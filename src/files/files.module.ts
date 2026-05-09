@@ -5,6 +5,8 @@ import {
 
 import { RelationalFilePersistenceModule } from './infrastructure/persistence/relational/relational-persistence.module';
 import { FilesService } from './files.service';
+import { FilesPresignController } from './files-presign.controller';
+import { FilesPresignService } from './files-presign.service';
 import fileConfig from './config/file.config';
 import { FileConfig, FileDriver } from './config/file-config.type';
 import { FilesLocalModule } from './infrastructure/uploader/local/files.module';
@@ -26,7 +28,8 @@ const infrastructureUploaderModule =
     infrastructurePersistenceModule,
     infrastructureUploaderModule,
   ],
-  providers: [FilesService],
+  controllers: [FilesPresignController],
+  providers: [FilesService, FilesPresignService],
   exports: [FilesService, infrastructurePersistenceModule],
 })
 export class FilesModule {}

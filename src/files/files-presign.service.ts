@@ -1,106 +1,71 @@
 import {
-  HttpStatus,
   Injectable,
   NotFoundException,
   PayloadTooLargeException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { FileRepository } from '../../persistence/file.repository';
-
+import { ConfigService } from '@nestjs/config';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { randomStringGenerator } from '@nestjs/common/utils/random-string-generator.util';
+import { AllConfigType } from '../config/config.type';
+import { FileType } from './domain/file';
+import { FileRepository } from './infrastructure/persistence/file.repository';
 import {
   CHAT_ATTACHMENT_MIME_WHITELIST,
   CHAT_ATTACHMENT_PURPOSE,
   FileUploadDto,
-} from './dto/file.dto';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { randomStringGenerator } from '@nestjs/common/utils/random-string-generator.util';
-import { ConfigService } from '@nestjs/config';
-import { FileType } from '../../../domain/file';
-import { AllConfigType } from '../../../../config/config.type';
+} from './infrastructure/uploader/s3-presigned/dto/file.dto';
 
 @Injectable()
-export class FilesS3PresignedService {
-  private s3: S3Client;
+export class FilesPresignService {
+  private readonly s3: S3Client;
   private readonly chatAttachmentMaxBytes = 25 * 1024 * 1024;
   private readonly chatAttachmentDailyQuotaBytes = 100 * 1024 * 1024;
 
   constructor(
     private readonly fileRepository: FileRepository,
-    private readonly configService: ConfigService<AllConfigType>,
+    private readonly config: ConfigService<AllConfigType>,
   ) {
     this.s3 = new S3Client({
-      region: configService.get('file.awsS3Region', { infer: true }),
-      credentials: {
-        accessKeyId: configService.getOrThrow('file.accessKeyId', {
-          infer: true,
-        }),
-        secretAccessKey: configService.getOrThrow('file.secretAccessKey', {
-          infer: true,
-        }),
-      },
+      region:
+        this.config.get('file.awsS3Region', { infer: true }) || 'us-east-1',
+      credentials: this.hasS3Config()
+        ? {
+            accessKeyId: this.config.getOrThrow('file.accessKeyId', {
+              infer: true,
+            }),
+            secretAccessKey: this.config.getOrThrow('file.secretAccessKey', {
+              infer: true,
+            }),
+          }
+        : undefined,
     });
   }
 
-  async create(
+  async presign(
     file: FileUploadDto,
-    userId?: number,
-  ): Promise<{ file: FileType; uploadSignedUrl: string }> {
-    if (!file) {
-      throw new UnprocessableEntityException({
-        status: HttpStatus.UNPROCESSABLE_ENTITY,
-        errors: {
-          file: 'selectFile',
-        },
-      });
-    }
-
+    userId: number,
+  ): Promise<{ fileId: string; uploadUrl: string }> {
     const purpose = file.purpose ?? 'general';
     const isChatAttachment = purpose === CHAT_ATTACHMENT_PURPOSE;
     const mimeType = file.mimeType ?? this.inferMimeType(file.fileName);
-
     if (isChatAttachment) {
       this.assertChatAttachmentMetadata(file.fileSize, mimeType);
-    } else if (!file.fileName.match(/\.(jpg|jpeg|png|gif)$/i)) {
-      throw new UnprocessableEntityException({
-        status: HttpStatus.UNPROCESSABLE_ENTITY,
-        errors: {
-          file: `cantUploadFileType`,
-        },
-      });
-    }
-
-    if (
-      !isChatAttachment &&
-      file.fileSize >
-        (this.configService.get('file.maxFileSize', {
-          infer: true,
-        }) || 0)
-    ) {
-      throw new PayloadTooLargeException({
-        statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
-        error: 'Payload Too Large',
-        message: 'File too large',
-      });
+    } else {
+      const max = this.config.get('file.maxFileSize', { infer: true }) || 0;
+      if (file.fileSize > max) {
+        throw new PayloadTooLargeException('File too large');
+      }
     }
 
     const key = `${randomStringGenerator()}.${file.fileName
       .split('.')
       .pop()
       ?.toLowerCase()}`;
-
-    const command = new PutObjectCommand({
-      Bucket: this.configService.getOrThrow('file.awsDefaultS3Bucket', {
-        infer: true,
-      }),
-      Key: key,
-      ContentLength: file.fileSize,
-      ContentType: mimeType,
-    });
-    const signedUrl = await getSignedUrl(this.s3, command, { expiresIn: 3600 });
-    const data = await this.fileRepository.create({
+    const created = await this.fileRepository.create({
       path: key,
-      userId: userId ?? null,
+      userId,
       purpose,
       mimeType,
       sizeBytes: file.fileSize,
@@ -111,8 +76,8 @@ export class FilesS3PresignedService {
     });
 
     return {
-      file: data,
-      uploadSignedUrl: signedUrl,
+      fileId: created.id,
+      uploadUrl: await this.buildUploadUrl(key, file.fileSize, mimeType),
     };
   }
 
@@ -124,17 +89,43 @@ export class FilesS3PresignedService {
     }
     if (file.purpose === CHAT_ATTACHMENT_PURPOSE) {
       this.assertChatAttachmentMetadata(file.sizeBytes ?? 0, file.mimeType);
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const used = await this.fileRepository.sumConfirmedBytesSince({
         userId,
         purpose: CHAT_ATTACHMENT_PURPOSE,
-        since,
+        since: new Date(Date.now() - 24 * 60 * 60 * 1000),
       });
       if (used + (file.sizeBytes ?? 0) > this.chatAttachmentDailyQuotaBytes) {
         throw new UnprocessableEntityException('attachment_quota_exceeded');
       }
     }
     return { file: (await this.fileRepository.confirm(fileId)) ?? file };
+  }
+
+  private async buildUploadUrl(
+    key: string,
+    fileSize: number,
+    mimeType: string,
+  ): Promise<string> {
+    if (!this.hasS3Config()) {
+      return `/files/presigned/${key}`;
+    }
+    const command = new PutObjectCommand({
+      Bucket: this.config.getOrThrow('file.awsDefaultS3Bucket', {
+        infer: true,
+      }),
+      Key: key,
+      ContentLength: fileSize,
+      ContentType: mimeType,
+    });
+    return getSignedUrl(this.s3, command, { expiresIn: 3600 });
+  }
+
+  private hasS3Config(): boolean {
+    return Boolean(
+      this.config.get('file.accessKeyId', { infer: true }) &&
+      this.config.get('file.secretAccessKey', { infer: true }) &&
+      this.config.get('file.awsDefaultS3Bucket', { infer: true }),
+    );
   }
 
   private assertChatAttachmentMetadata(
@@ -166,8 +157,6 @@ export class FilesS3PresignedService {
         return 'image/webp';
       case 'pdf':
         return 'application/pdf';
-      case 'gif':
-        return 'image/gif';
       default:
         return 'application/octet-stream';
     }

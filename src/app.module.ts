@@ -40,6 +40,7 @@ import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ChatModule } from './chat/chat.module';
+import { FcmModule } from './fcm/fcm.module';
 
 const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
   useClass: TypeOrmConfigService,
@@ -113,6 +114,7 @@ const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
     CartModule,
     OrdersModule,
     ReviewsModule,
+    FcmModule,
     ChatModule,
   ],
 })

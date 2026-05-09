@@ -15,4 +15,23 @@ export class FilesService {
   findByIds(ids: FileType['id'][]): Promise<FileType[]> {
     return this.fileRepository.findByIds(ids);
   }
+
+  sumConfirmedBytesSince(input: {
+    userId: number;
+    purpose: string;
+    since: Date;
+  }): Promise<number> {
+    return this.fileRepository.sumConfirmedBytesSince(input);
+  }
+
+  confirm(id: FileType['id']): Promise<NullableType<FileType>> {
+    return this.fileRepository.confirm(id);
+  }
+
+  updateVariants(
+    id: FileType['id'],
+    variants: Record<string, string>,
+  ): Promise<NullableType<FileType>> {
+    return this.fileRepository.updateVariants(id, variants);
+  }
 }

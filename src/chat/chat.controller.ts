@@ -12,7 +12,6 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { ChatService } from './chat.service';
 import { Conversation } from './domain/conversation';
@@ -81,7 +80,6 @@ export class ChatController {
   }
 
   @Post(':id/messages')
-  @Throttle({ default: { limit: 10, ttl: 10_000 } })
   @ApiOperation({
     summary:
       'Send a message. Rate-limited to 10/10s per user. Body or attachments required.',
