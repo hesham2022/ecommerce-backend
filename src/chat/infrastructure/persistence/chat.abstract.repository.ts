@@ -105,6 +105,11 @@ export abstract class ChatAbstractRepository {
   abstract findMessageById(id: string): Promise<Message | null>;
   abstract listMessages(opts: ListMessagesOptions): Promise<Message[]>;
   abstract latestMessageId(conversationId: string): Promise<string | null>;
+  abstract countDirectMessagesFromUser(input: {
+    vendorId: string;
+    buyerId: number;
+    senderUserId: number;
+  }): Promise<number>;
 
   // User block
   abstract findBlock(

@@ -53,4 +53,36 @@ export class FileType {
     },
   )
   path: string;
+
+  @ApiProperty({ example: 42, nullable: true })
+  @Allow()
+  userId?: number | null;
+
+  @ApiProperty({ example: 'chat-attachment', nullable: true })
+  @Allow()
+  purpose?: string | null;
+
+  @ApiProperty({ example: 'image/jpeg', nullable: true })
+  @Allow()
+  mimeType?: string | null;
+
+  @ApiProperty({ example: 138723, nullable: true })
+  @Allow()
+  sizeBytes?: number | null;
+
+  @ApiProperty({ example: false })
+  @Allow()
+  isConfirmed?: boolean;
+
+  @ApiProperty({ example: { thumb: 'a.thumb.jpg' }, nullable: true })
+  @Allow()
+  variants?: Record<string, string> | null;
+
+  @ApiProperty({ nullable: true })
+  @Allow()
+  createdAt?: Date;
+
+  @ApiProperty({ nullable: true })
+  @Allow()
+  confirmedAt?: Date | null;
 }
