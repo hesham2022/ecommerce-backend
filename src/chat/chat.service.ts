@@ -26,6 +26,7 @@ import {
   ChatAbstractRepository,
   ConversationListItem,
 } from './infrastructure/persistence/chat.abstract.repository';
+import { ChatRealtimeBus } from './realtime/chat-realtime.bus';
 
 const MAX_BODY_LEN = 5000;
 const MAX_ATTACHMENTS = 5;
@@ -59,6 +60,7 @@ export class ChatService {
     private readonly vendors: VendorsService,
     private readonly files: FilesService,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly realtimeBus: ChatRealtimeBus,
   ) {}
 
   // ── Conversations ─────────────────────────────────────────────────
@@ -333,6 +335,13 @@ export class ChatService {
         position: idx,
       })),
     });
+    // Fan out via the realtime bus (gateway listens). Single emit point —
+    // both REST and WS converge here, so no double-broadcast.
+    this.realtimeBus.emitMessageNew({
+      conversationId,
+      message,
+      recipientUserIds: participants.map((p) => p.userId),
+    });
     return message;
   }
 
@@ -354,6 +363,11 @@ export class ChatService {
       target = await this.chat.latestMessageId(conversationId);
     }
     await this.chat.setLastReadMessage(conversationId, callerUserId, target);
+    this.realtimeBus.emitMessageRead({
+      conversationId,
+      userId: callerUserId,
+      messageId: target,
+    });
   }
 
   async setArchived(
