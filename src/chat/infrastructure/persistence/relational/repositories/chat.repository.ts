@@ -116,7 +116,7 @@ export class ChatRelationalRepository implements ChatAbstractRepository {
       .innerJoinAndSelect('p.conversation', 'c')
       .where('p.user_id = :userId', { userId: opts.userId })
       .andWhere('p.is_archived = :archived', { archived: opts.archived })
-      .orderBy('c.last_message_at', 'DESC')
+      .orderBy('c.lastMessageAt', 'DESC')
       .take(opts.limit);
     if (opts.cursor) {
       qb.andWhere('c.last_message_at < :cursor', { cursor: opts.cursor });
@@ -306,7 +306,7 @@ export class ChatRelationalRepository implements ChatAbstractRepository {
       .createQueryBuilder('m')
       .leftJoinAndSelect('m.attachments', 'a')
       .where('m.conversation_id = :cid', { cid: opts.conversationId })
-      .orderBy('m.created_at', 'DESC')
+      .orderBy('m.createdAt', 'DESC')
       .take(opts.limit);
     if (opts.cursor) {
       qb.andWhere('m.created_at < :cursor', { cursor: opts.cursor });
@@ -323,6 +323,23 @@ export class ChatRelationalRepository implements ChatAbstractRepository {
       order: { createdAt: 'DESC' },
     });
     return row?.id ?? null;
+  }
+
+  async countDirectMessagesFromUser(input: {
+    vendorId: string;
+    buyerId: number;
+    senderUserId: number;
+  }): Promise<number> {
+    return this.msgRepo
+      .createQueryBuilder('m')
+      .innerJoin('m.conversation', 'c')
+      .where('c.kind = :kind', { kind: ConversationKind.DIRECT })
+      .andWhere('c.vendor_id = :vendorId', { vendorId: input.vendorId })
+      .andWhere('c.buyer_id = :buyerId', { buyerId: input.buyerId })
+      .andWhere('m.sender_user_id = :senderUserId', {
+        senderUserId: input.senderUserId,
+      })
+      .getCount();
   }
 
   // ── User block ────────────────────────────────────────────────────

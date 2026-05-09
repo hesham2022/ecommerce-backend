@@ -24,6 +24,8 @@ describe('Chat (e2e)', () => {
   let conversationId = ''; // DIRECT conversation
   let orderConversationId = ''; // ORDER conversation
   let placedSubOrderId = '';
+  let spamVendorId = '';
+  let spamConversationId = '';
 
   const saAddress = {
     fullName: 'Layla Al-Mansour',
@@ -112,6 +114,61 @@ describe('Chat (e2e)', () => {
     expect(otherLogin.status).toBe(200);
     otherToken = otherLogin.body.token as string;
     otherUserId = otherLogin.body.user.id as number;
+  });
+
+  it('should register, upsert, and delete FCM tokens under /me', async () => {
+    const token = `fcm-${ts}`;
+    const first = await request(APP_URL)
+      .post('/api/v1/me/fcm-tokens')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ token, platform: 'ios', deviceId: 'ios-1' });
+    expect(first.status).toBe(201);
+    expect(first.body.token).toBe(token);
+
+    const duplicate = await request(APP_URL)
+      .post('/api/v1/me/fcm-tokens')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ token, platform: 'android', deviceId: 'android-1' });
+    expect(duplicate.status).toBe(201);
+    expect(duplicate.body.id).toBe(first.body.id);
+    expect(duplicate.body.platform).toBe('android');
+
+    const removed = await request(APP_URL)
+      .delete(`/api/v1/me/fcm-tokens/${encodeURIComponent(token)}`)
+      .set('Authorization', `Bearer ${buyerToken}`);
+    expect(removed.status).toBe(204);
+  });
+
+  it('should enforce 100MB/day quota for confirmed chat attachments', async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const presign = await request(APP_URL)
+        .post('/api/v1/files/presign')
+        .set('Authorization', `Bearer ${buyerToken}`)
+        .send({
+          fileName: `quota-${i}.jpg`,
+          fileSize: 20 * 1024 * 1024,
+          mimeType: 'image/jpeg',
+          purpose: 'chat-attachment',
+        });
+      expect(presign.status).toBe(201);
+      ids.push(presign.body.fileId as string);
+    }
+
+    for (const id of ids.slice(0, 5)) {
+      const confirm = await request(APP_URL)
+        .post(`/api/v1/files/${id}/confirm`)
+        .set('Authorization', `Bearer ${buyerToken}`);
+      expect(confirm.status).toBe(201);
+    }
+
+    const rejected = await request(APP_URL)
+      .post(`/api/v1/files/${ids[5]}/confirm`)
+      .set('Authorization', `Bearer ${buyerToken}`);
+    expect(rejected.status).toBe(422);
+    expect(JSON.stringify(rejected.body)).toContain(
+      'attachment_quota_exceeded',
+    );
   });
 
   // ── DIRECT conversation idempotent create ────────────────────────────
@@ -415,6 +472,44 @@ describe('Chat (e2e)', () => {
     expect(second.body.id).toBe(orderConversationId);
   });
 
+  it('should rate-limit the 31st unreplied DIRECT message per pair', async () => {
+    const signup = await request(APP_URL)
+      .post('/api/v1/vendor/signup')
+      .send({
+        email: `chat-spam-vendor-${ts}@example.com`,
+        password: vendorPassword,
+        firstName: 'Spam',
+        lastName: 'Vendor',
+        name: `Spam Shop ${ts}`,
+      });
+    expect(signup.status).toBe(201);
+    spamVendorId = signup.body.id as string;
+    const approve = await request(APP_URL)
+      .patch(`/api/v1/admin/vendors/${spamVendorId}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(approve.status).toBe(200);
+    const convo = await request(APP_URL)
+      .post('/api/v1/conversations')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ kind: 'DIRECT', vendorId: spamVendorId });
+    expect(convo.status).toBe(201);
+    spamConversationId = convo.body.id as string;
+
+    for (let i = 0; i < 30; i++) {
+      const send = await request(APP_URL)
+        .post(`/api/v1/conversations/${spamConversationId}/messages`)
+        .set('Authorization', `Bearer ${buyerToken}`)
+        .send({ body: `spam-${i}` });
+      expect(send.status).toBe(201);
+    }
+    const limited = await request(APP_URL)
+      .post(`/api/v1/conversations/${spamConversationId}/messages`)
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ body: 'spam-30' });
+    expect(limited.status).toBe(429);
+    expect(limited.body.message).toBe('rate_limited');
+  });
+
   // ── Report dedup ────────────────────────────────────────────────────
 
   it('should reports a conversation; duplicate OPEN report is rejected (422); admin resolves', async () => {
@@ -459,5 +554,6 @@ describe('Chat (e2e)', () => {
   it('should snapshot of acquired ids', () => {
     expect(typeof otherUserId).toBe('number');
     expect(typeof orderConversationId).toBe('string');
+    expect(typeof spamConversationId).toBe('string');
   });
 });

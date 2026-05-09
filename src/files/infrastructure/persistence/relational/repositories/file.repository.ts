@@ -43,4 +43,36 @@ export class FileRelationalRepository implements FileRepository {
 
     return entities.map((entity) => FileMapper.toDomain(entity));
   }
+
+  async sumConfirmedBytesSince(input: {
+    userId: number;
+    purpose: string;
+    since: Date;
+  }): Promise<number> {
+    const row = await this.fileRepository
+      .createQueryBuilder('f')
+      .select('COALESCE(SUM(f.size_bytes), 0)', 'sum')
+      .where('f.user_id = :userId', { userId: input.userId })
+      .andWhere('f.purpose = :purpose', { purpose: input.purpose })
+      .andWhere('f.is_confirmed = true')
+      .andWhere('f.created_at > :since', { since: input.since })
+      .getRawOne<{ sum: string }>();
+    return Number(row?.sum ?? 0);
+  }
+
+  async confirm(id: FileType['id']): Promise<FileType | null> {
+    await this.fileRepository.update(
+      { id },
+      { isConfirmed: true, confirmedAt: new Date() },
+    );
+    return this.findById(id);
+  }
+
+  async updateVariants(
+    id: FileType['id'],
+    variants: Record<string, string>,
+  ): Promise<FileType | null> {
+    await this.fileRepository.update({ id }, { variants });
+    return this.findById(id);
+  }
 }

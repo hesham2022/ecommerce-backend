@@ -1,16 +1,27 @@
 import {
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
+  Logger,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { uuidv7Generate } from '../utils/uuid';
 import { UsersService } from '../users/users.service';
 import { VendorsService } from '../vendors/vendors.service';
 import { RoleEnum } from '../roles/roles.enum';
 import { FilesService } from '../files/files.service';
+import { FileType } from '../files/domain/file';
+import {
+  CHAT_ATTACHMENT_MIME_WHITELIST,
+  CHAT_ATTACHMENT_PURPOSE,
+} from '../files/infrastructure/uploader/s3-presigned/dto/file.dto';
+import { RedisService } from '../redis/redis.service';
 import { OrderEntity } from '../orders/infrastructure/persistence/relational/entities/order.entity';
 import { SubOrderEntity } from '../orders/infrastructure/persistence/relational/entities/sub-order.entity';
 import { VendorEntity } from '../vendors/infrastructure/persistence/relational/entities/vendor.entity';
@@ -27,9 +38,12 @@ import {
   ConversationListItem,
 } from './infrastructure/persistence/chat.abstract.repository';
 import { ChatRealtimeBus } from './realtime/chat-realtime.bus';
+import { ChatPushJob } from './push/chat-push.payload';
 
 const MAX_BODY_LEN = 5000;
 const MAX_ATTACHMENTS = 5;
+const DIRECT_UNREPLIED_LIMIT = 30;
+const DIRECT_UNREPLIED_WINDOW_MS = 60 * 60 * 1000;
 
 export interface CounterpartyProfile {
   userId: number;
@@ -54,11 +68,16 @@ export interface ConversationListResult {
 
 @Injectable()
 export class ChatService {
+  private readonly log = new Logger(ChatService.name);
+
   constructor(
     private readonly chat: ChatAbstractRepository,
     private readonly users: UsersService,
     private readonly vendors: VendorsService,
     private readonly files: FilesService,
+    private readonly redis: RedisService,
+    @InjectQueue('push-message') private readonly pushQueue: Queue<ChatPushJob>,
+    @InjectQueue('image-thumb') private readonly imageThumbQueue: Queue,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly realtimeBus: ChatRealtimeBus,
   ) {}
@@ -291,6 +310,13 @@ export class ChatService {
         );
       }
     }
+    if (convo.kind === ConversationKind.DIRECT && counterparty) {
+      await this.enforceDirectAntiSpam({
+        convo,
+        senderUserId: callerUserId,
+        recipientUserId: counterparty.userId,
+      });
+    }
 
     const body = (input.body ?? '').trim();
     const attachmentIds = input.attachmentFileIds ?? [];
@@ -310,9 +336,7 @@ export class ChatService {
       );
     }
 
-    // Validate file ownership by checking they exist. (Files module
-    // doesn't carry an owner field in v1; the presign+confirm slice
-    // will tighten this. For now we only ensure the file row exists.)
+    const attachmentFiles: FileType[] = [];
     for (const fid of attachmentIds) {
       const f = await this.files.findById(fid);
       if (!f) {
@@ -320,6 +344,24 @@ export class ChatService {
           `attachment file_id ${fid} not found`,
         );
       }
+      if (f.userId !== callerUserId || f.purpose !== CHAT_ATTACHMENT_PURPOSE) {
+        throw new UnprocessableEntityException('attachment_not_owned_by_user');
+      }
+      if (!f.isConfirmed) {
+        throw new UnprocessableEntityException('attachment_not_confirmed');
+      }
+      if ((f.sizeBytes ?? 0) > 25 * 1024 * 1024) {
+        throw new UnprocessableEntityException('attachment_file_too_large');
+      }
+      if (
+        !f.mimeType ||
+        !CHAT_ATTACHMENT_MIME_WHITELIST.includes(
+          f.mimeType as (typeof CHAT_ATTACHMENT_MIME_WHITELIST)[number],
+        )
+      ) {
+        throw new UnprocessableEntityException('attachment_mime_not_allowed');
+      }
+      attachmentFiles.push(f);
     }
 
     const id = uuidv7Generate();
@@ -331,7 +373,9 @@ export class ChatService {
       attachments: attachmentIds.map((fid, idx) => ({
         id: uuidv7Generate(),
         fileId: fid,
-        kind: MessageAttachmentKind.FILE,
+        kind: attachmentFiles[idx]?.mimeType?.startsWith('image/')
+          ? MessageAttachmentKind.IMAGE
+          : MessageAttachmentKind.FILE,
         position: idx,
       })),
     });
@@ -341,6 +385,14 @@ export class ChatService {
       conversationId,
       message,
       recipientUserIds: participants.map((p) => p.userId),
+    });
+    await this.onMessagePersisted({
+      convo,
+      message,
+      senderUserId: callerUserId,
+      participants,
+      body,
+      attachmentMimeTypes: attachmentFiles.map((file) => file.mimeType ?? ''),
     });
     return message;
   }
@@ -463,6 +515,165 @@ export class ChatService {
         'You are not a participant of this conversation',
       );
     }
+  }
+
+  private async enforceDirectAntiSpam(input: {
+    convo: Conversation;
+    senderUserId: number;
+    recipientUserId: number;
+  }): Promise<void> {
+    const recipientReplies = await this.chat.countDirectMessagesFromUser({
+      vendorId: input.convo.vendorId,
+      buyerId: input.convo.buyerId,
+      senderUserId: input.recipientUserId,
+    });
+    if (recipientReplies > 0) return;
+
+    const now = Date.now();
+    const key = `chat:direct-unreplied:${input.senderUserId}:${input.recipientUserId}`;
+    const redis = this.redis.raw();
+    await redis.zremrangebyscore(key, 0, now - DIRECT_UNREPLIED_WINDOW_MS);
+    const count = await redis.zcard(key);
+    if (count >= DIRECT_UNREPLIED_LIMIT) {
+      const oldest = await redis.zrange(key, 0, 0, 'WITHSCORES');
+      const retryAfter = Math.max(
+        1,
+        Math.ceil(
+          (Number(oldest[1] ?? now) + DIRECT_UNREPLIED_WINDOW_MS - now) / 1000,
+        ),
+      );
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message: 'rate_limited',
+          retryAfter,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    await redis
+      .multi()
+      .zadd(key, now, `${now}:${uuidv7Generate()}`)
+      .pexpire(key, DIRECT_UNREPLIED_WINDOW_MS)
+      .exec();
+  }
+
+  private async relaxDirectAntiSpamOnFirstReply(input: {
+    convo: Conversation;
+    senderUserId: number;
+    recipientUserId: number;
+  }): Promise<void> {
+    if (input.convo.kind !== ConversationKind.DIRECT) return;
+    const priorMessagesFromSender = await this.chat.countDirectMessagesFromUser(
+      {
+        vendorId: input.convo.vendorId,
+        buyerId: input.convo.buyerId,
+        senderUserId: input.senderUserId,
+      },
+    );
+    if (priorMessagesFromSender !== 1) return;
+    await this.redis
+      .raw()
+      .del(
+        `chat:direct-unreplied:${input.recipientUserId}:${input.senderUserId}`,
+      );
+  }
+
+  private async onMessagePersisted(input: {
+    convo: Conversation;
+    message: Message;
+    senderUserId: number;
+    participants: { userId: number }[];
+    body: string;
+    attachmentMimeTypes: string[];
+  }): Promise<void> {
+    const recipients = input.participants
+      .filter((p) => p.userId !== input.senderUserId)
+      .map((p) => p.userId);
+    const offlineRecipients: number[] = [];
+    for (const recipient of recipients) {
+      if (!(await this.isOnline(recipient))) offlineRecipients.push(recipient);
+    }
+    if (offlineRecipients.length > 0) {
+      await this.pushQueue.add(
+        'push:message',
+        {
+          conversationId: input.convo.id,
+          messageId: input.message.id,
+          recipientUserIds: offlineRecipients,
+          senderUserId: input.senderUserId,
+          senderName: await this.senderDisplayName(
+            input.convo,
+            input.senderUserId,
+          ),
+          bodyPreview: this.buildBodyPreview(
+            input.body,
+            input.message.attachments.length,
+          ),
+          conversationKind: input.convo.kind,
+        },
+        { removeOnComplete: 100, removeOnFail: 100 },
+      );
+    }
+
+    for (const attachment of input.message.attachments) {
+      if (attachment.kind === MessageAttachmentKind.IMAGE) {
+        await this.imageThumbQueue.add(
+          'image:thumb',
+          { fileId: attachment.fileId },
+          { removeOnComplete: 100, removeOnFail: 100 },
+        );
+      }
+    }
+
+    const counterparty = recipients[0];
+    if (counterparty) {
+      await this.relaxDirectAntiSpamOnFirstReply({
+        convo: input.convo,
+        senderUserId: input.senderUserId,
+        recipientUserId: counterparty,
+      });
+    }
+  }
+
+  private async isOnline(userId: number): Promise<boolean> {
+    try {
+      return (
+        (await this.redis
+          .raw()
+          .sismember('presence:online', String(userId))) === 1
+      );
+    } catch (error) {
+      this.log.warn(
+        `Presence check failed; treating user ${userId} as offline: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return false;
+    }
+  }
+
+  private async senderDisplayName(
+    convo: Conversation,
+    senderUserId: number,
+  ): Promise<string> {
+    if (convo.vendorId) {
+      const vendor = await this.vendors.findById(convo.vendorId);
+      if (vendor?.userId === senderUserId) {
+        return (
+          vendor.nameTranslations.en ??
+          Object.values(vendor.nameTranslations)[0] ??
+          'Vendor'
+        );
+      }
+    }
+    const user = await this.users.findById(senderUserId);
+    return user?.firstName ?? user?.email ?? 'User';
+  }
+
+  private buildBodyPreview(body: string, attachmentCount: number): string {
+    if (body.length > 0) return body.slice(0, 80);
+    return `📎 ${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`;
   }
 }
 

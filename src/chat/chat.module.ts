@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bullmq';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AdminAuditLogModule } from '../admin-audit-log/admin-audit-log.module';
 import { FilesModule } from '../files/files.module';
+import { FcmModule } from '../fcm/fcm.module';
 import { SubOrderEntity } from '../orders/infrastructure/persistence/relational/entities/sub-order.entity';
 import { OrderEntity } from '../orders/infrastructure/persistence/relational/entities/order.entity';
 import { UsersModule } from '../users/users.module';
@@ -17,15 +19,19 @@ import { UserBlockController } from './user-block.controller';
 import { RelationalChatPersistenceModule } from './infrastructure/persistence/relational/relational-persistence.module';
 import { ChatPresenceService } from './realtime/chat-presence.service';
 import { ChatRealtimeBus } from './realtime/chat-realtime.bus';
+import { PushMessageProcessor } from './push/push-message.processor';
+import { ImageThumbProcessor } from './thumbnails/image-thumb.processor';
 
 @Module({
   imports: [
     ThrottlerModule.forRoot([{ name: 'default', ttl: 10_000, limit: 10_000 }]),
+    BullModule.registerQueue({ name: 'push-message' }, { name: 'image-thumb' }),
     TypeOrmModule.forFeature([SubOrderEntity, OrderEntity]),
     RelationalChatPersistenceModule,
     UsersModule,
     VendorsModule,
     FilesModule,
+    FcmModule,
     AdminAuditLogModule,
     JwtModule.register({}),
   ],
@@ -39,6 +45,8 @@ import { ChatRealtimeBus } from './realtime/chat-realtime.bus';
     ChatGateway,
     ChatPresenceService,
     ChatRealtimeBus,
+    PushMessageProcessor,
+    ImageThumbProcessor,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
   exports: [ChatService],
