@@ -4,6 +4,7 @@ export enum OrderPaymentMethod {
 
 export enum OrderPaymentStatus {
   PENDING = 'PENDING',
+  PARTIAL = 'PARTIAL',
   COLLECTED = 'COLLECTED',
   FAILED = 'FAILED',
 }
@@ -16,4 +17,10 @@ export enum SubOrderFulfillmentStatus {
   DELIVERED = 'DELIVERED',
   CANCELLED = 'CANCELLED',
   RETURNED = 'RETURNED',
+}
+
+export enum OrderEventType {
+  STATUS_CHANGED = 'STATUS_CHANGED',
+  PAYMENT_COLLECTED = 'PAYMENT_COLLECTED',
+  DELIVERED_BY_BUYER = 'DELIVERED_BY_BUYER',
 }
