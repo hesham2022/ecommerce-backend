@@ -1,5 +1,5 @@
 export type StripeConfig = {
-  secretKey: string;
-  webhookSecret: string;
-  publishableKey: string;
+  secretKey?: string;
+  webhookSecret?: string;
+  publishableKey?: string;
 };
