@@ -81,6 +81,10 @@ export class VendorsService {
     return v;
   }
 
+  async findById(id: string): Promise<Vendor | null> {
+    return this.repo.findById(id);
+  }
+
   async getByUserId(userId: number): Promise<Vendor | null> {
     return this.repo.findByUserId(userId);
   }
