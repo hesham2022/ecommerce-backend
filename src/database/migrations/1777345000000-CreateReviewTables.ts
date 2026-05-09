@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateReviewTables1777340000000 implements MigrationInterface {
-  name = 'CreateReviewTables1777340000000';
+export class CreateReviewTables1777345000000 implements MigrationInterface {
+  name = 'CreateReviewTables1777345000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // ── Enum ──────────────────────────────────────────────────────────
