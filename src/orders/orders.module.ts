@@ -7,10 +7,12 @@ import { ShippingZonesModule } from '../shipping-zones/shipping-zones.module';
 import { VendorsModule } from '../vendors/vendors.module';
 import { CheckoutController } from './checkout.controller';
 import { CheckoutService } from './checkout.service';
+import { FulfillmentService } from './fulfillment.service';
 import { IdempotencyHelper } from './idempotency.helper';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { VendorOrdersController } from './vendor-orders.controller';
+import { VendorSubOrdersController } from './vendor-suborders.controller';
 import { RelationalOrderPersistenceModule } from './infrastructure/persistence/relational/relational-persistence.module';
 
 @Module({
@@ -23,8 +25,18 @@ import { RelationalOrderPersistenceModule } from './infrastructure/persistence/r
     ProductsModule,
     RegionsModule,
   ],
-  controllers: [CheckoutController, OrdersController, VendorOrdersController],
-  providers: [CheckoutService, OrdersService, IdempotencyHelper],
-  exports: [CheckoutService, OrdersService],
+  controllers: [
+    CheckoutController,
+    OrdersController,
+    VendorOrdersController,
+    VendorSubOrdersController,
+  ],
+  providers: [
+    CheckoutService,
+    OrdersService,
+    FulfillmentService,
+    IdempotencyHelper,
+  ],
+  exports: [CheckoutService, OrdersService, FulfillmentService],
 })
 export class OrdersModule {}

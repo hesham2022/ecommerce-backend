@@ -25,10 +25,15 @@ import {
 import type { Request, Response } from 'express';
 import { CheckoutService } from './checkout.service';
 import { Order } from './domain/order';
+import { OrderEvent } from './domain/order-event';
+import { SubOrder } from './domain/sub-order';
 import { PlaceOrderDto } from './dto/place-order.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
+import { SubOrderEventsQueryDto } from './dto/sub-order-events-query.dto';
+import { FulfillmentService } from './fulfillment.service';
 import { IdempotencyHelper } from './idempotency.helper';
 import { OrdersService } from './orders.service';
+import { ProductsService } from '../products/products.service';
 
 const IDEMPOTENCY_SCOPE = 'orders';
 
@@ -41,6 +46,8 @@ export class OrdersController {
     private readonly checkout: CheckoutService,
     private readonly orders: OrdersService,
     private readonly idempotency: IdempotencyHelper,
+    private readonly fulfillment: FulfillmentService,
+    private readonly products: ProductsService,
   ) {}
 
   @Post()
@@ -153,6 +160,66 @@ export class OrdersController {
   ): Promise<Order> {
     const userId = (req.user as { id: number }).id;
     return this.orders.getById(userId, id);
+  }
+
+  @Post(':id/suborders/:sid/confirm-delivery')
+  @ApiOperation({
+    summary:
+      'Buyer confirms a SubOrder was delivered. Allowed only when current status is SHIPPED. Flips parent Order.payment_status to COLLECTED (or PARTIAL) for COD.',
+  })
+  @ApiOkResponse({ type: SubOrder })
+  async confirmDelivery(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sid', ParseUUIDPipe) sid: string,
+  ): Promise<SubOrder> {
+    const userId = (req.user as { id: number }).id;
+    return this.fulfillment.buyerConfirmDelivery({
+      buyerId: userId,
+      orderId: id,
+      subOrderId: sid,
+    });
+  }
+
+  @Get(':id/suborders/:sid/events')
+  @ApiOperation({
+    summary:
+      'Append-only timeline for one SubOrder. Visible to either the order buyer or the SubOrder owning vendor; everyone else gets 404.',
+  })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        data: { type: 'array', items: { type: 'object' } },
+        total: { type: 'number' },
+      },
+    },
+  })
+  async listSubOrderEvents(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sid', ParseUUIDPipe) sid: string,
+    @Query() query: SubOrderEventsQueryDto,
+  ): Promise<{ data: OrderEvent[]; total: number }> {
+    const userId = (req.user as { id: number }).id;
+    // Look up the caller's active vendor (if any). Failing to resolve
+    // a vendor for the user is fine — buyers won't have one.
+    let vendorId: string | null = null;
+    try {
+      const vendor = await this.products.getCallingActiveVendor(userId);
+      vendorId = vendor.id;
+    } catch {
+      vendorId = null;
+    }
+
+    return this.fulfillment.listEvents({
+      userId,
+      vendorId,
+      orderId: id,
+      subOrderId: sid,
+      page: query.page ?? 1,
+      limit: Math.min(query.limit ?? 50, 200),
+    });
   }
 
   /**
