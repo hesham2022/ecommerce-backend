@@ -41,6 +41,9 @@ import { OrdersModule } from './orders/orders.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ChatModule } from './chat/chat.module';
 import { FcmModule } from './fcm/fcm.module';
+import { AdminAuditLogModule } from './admin-audit-log/admin-audit-log.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { AdminSearchModule } from './admin-search/admin-search.module';
 
 const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
   useClass: TypeOrmConfigService,
@@ -116,6 +119,9 @@ const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
     ReviewsModule,
     FcmModule,
     ChatModule,
+    AdminAuditLogModule,
+    NotificationsModule,
+    AdminSearchModule,
   ],
 })
 export class AppModule {}
