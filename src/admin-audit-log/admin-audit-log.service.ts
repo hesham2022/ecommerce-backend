@@ -43,7 +43,8 @@ export class AdminAuditLogService {
     limit?: number;
   }): Promise<{ data: AdminAuditLogEntity[]; total: number }> {
     const where: Record<string, unknown> = {};
-    if (filter.adminUserId !== undefined) where.adminUserId = filter.adminUserId;
+    if (filter.adminUserId !== undefined)
+      where.adminUserId = filter.adminUserId;
     if (filter.action) where.action = filter.action;
     if (filter.targetType) where.targetType = filter.targetType;
     const limit = filter.limit ?? 20;
