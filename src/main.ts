@@ -13,11 +13,18 @@ import validationOptions from './utils/validation-options';
 import { AllConfigType } from './config/config.type';
 import { ResolvePromisesInterceptor } from './utils/serializer.interceptor';
 import { RequestContextInterceptor } from './request-context/request-context.interceptor';
+import { ChatRedisIoAdapter } from './chat/realtime/chat-redis-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   useContainer(app.select(AppModule), { fallbackOnErrors: true });
   const configService = app.get(ConfigService<AllConfigType>);
+
+  // Wire up Socket.IO with the Redis adapter for cross-instance fan-out.
+  // The adapter no-ops when CHAT_REDIS_ADAPTER=false (single-instance dev).
+  const wsAdapter = new ChatRedisIoAdapter(app);
+  await wsAdapter.connectToRedis();
+  app.useWebSocketAdapter(wsAdapter);
 
   const corsOrigins = (
     configService.get('app.frontendDomain', { infer: true }) ??
