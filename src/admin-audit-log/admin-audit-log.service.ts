@@ -30,4 +30,30 @@ export class AdminAuditLogService {
     });
     await this.repo.save(row);
   }
+
+  async log(input: RecordAuditLogInput): Promise<void> {
+    return this.record(input);
+  }
+
+  async list(filter: {
+    adminUserId?: number;
+    action?: string;
+    targetType?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ data: AdminAuditLogEntity[]; total: number }> {
+    const where: Record<string, unknown> = {};
+    if (filter.adminUserId !== undefined) where.adminUserId = filter.adminUserId;
+    if (filter.action) where.action = filter.action;
+    if (filter.targetType) where.targetType = filter.targetType;
+    const limit = filter.limit ?? 20;
+    const page = filter.page ?? 1;
+    const [data, total] = await this.repo.findAndCount({
+      where,
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip: (page - 1) * limit,
+    });
+    return { data, total };
+  }
 }

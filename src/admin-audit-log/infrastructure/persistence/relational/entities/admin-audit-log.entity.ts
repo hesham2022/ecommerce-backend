@@ -11,30 +11,32 @@ import { EntityRelationalHelper } from '../../../../../utils/relational-entity-h
 import { UserEntity } from '../../../../../users/infrastructure/persistence/relational/entities/user.entity';
 
 @Entity({ name: 'admin_audit_log' })
-@Index('idx_admin_audit_log_admin_created_at', ['adminUserId', 'createdAt'])
-@Index('idx_admin_audit_log_target', ['targetType', 'targetId'])
+@Index('idx_admin_audit_log_created_at', ['createdAt'])
+@Index('idx_admin_audit_log_admin_user_id', ['adminUserId'])
+@Index('idx_admin_audit_log_action', ['action'])
+@Index('idx_admin_audit_log_target_type', ['targetType'])
 export class AdminAuditLogEntity extends EntityRelationalHelper {
   @PrimaryColumn('uuid')
   id!: string;
 
-  @Column({ name: 'admin_user_id', type: 'int' })
+  @Column({ name: 'admin_user_id', type: 'integer' })
   adminUserId!: number;
 
   @ManyToOne(() => UserEntity, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'admin_user_id' })
-  admin!: UserEntity;
+  adminUser!: UserEntity;
 
-  @Column({ type: 'varchar', length: 64 })
+  @Column({ type: 'text' })
   action!: string;
 
-  @Column({ name: 'target_type', type: 'varchar', length: 64 })
+  @Column({ name: 'target_type', type: 'text' })
   targetType!: string;
 
-  @Column({ name: 'target_id', type: 'varchar', length: 64 })
-  targetId!: string;
+  @Column({ name: 'target_id', type: 'text', nullable: true })
+  targetId!: string | null;
 
-  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
-  payload!: Record<string, unknown>;
+  @Column({ type: 'jsonb', nullable: true })
+  payload!: Record<string, unknown> | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
