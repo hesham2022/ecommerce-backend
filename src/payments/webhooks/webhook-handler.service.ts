@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { uuidv7Generate } from '../../utils/uuid';
 import { OrdersService } from '../../orders/orders.service';
 import { PaymentProviderName, PaymentStatus } from '../domain/payment-enums';
@@ -13,6 +19,7 @@ export class WebhookHandlerService {
   constructor(
     private readonly payments: PaymentAbstractRepository,
     private readonly events: PaymentEventAbstractRepository,
+    @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
   ) {}
 

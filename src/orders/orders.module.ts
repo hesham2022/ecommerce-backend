@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { CartModule } from '../cart/cart.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { ProductsModule } from '../products/products.module';
@@ -25,7 +25,7 @@ import { RelationalOrderPersistenceModule } from './infrastructure/persistence/r
     VendorsModule,
     ProductsModule,
     RegionsModule,
-    PaymentsModule,
+    forwardRef(() => PaymentsModule),
   ],
   controllers: [
     CheckoutController,

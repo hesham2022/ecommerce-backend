@@ -2,9 +2,11 @@ import {
   Body,
   ConflictException,
   Controller,
+  forwardRef,
   Get,
   Headers,
   HttpStatus,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
@@ -59,6 +61,7 @@ export class OrdersController {
     private readonly idempotency: IdempotencyHelper,
     private readonly fulfillment: FulfillmentService,
     private readonly products: ProductsService,
+    @Inject(forwardRef(() => PaymentsService))
     private readonly payments: PaymentsService,
   ) {}
 

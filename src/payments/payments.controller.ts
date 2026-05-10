@@ -1,7 +1,9 @@
 import {
   Controller,
   ForbiddenException,
+  forwardRef,
   Get,
+  Inject,
   Param,
   Req,
   UseGuards,
@@ -20,6 +22,7 @@ import { PaymentsService } from './payments.service';
 export class PaymentsController {
   constructor(
     private readonly payments: PaymentsService,
+    @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
   ) {}
 
