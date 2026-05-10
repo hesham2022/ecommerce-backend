@@ -4,6 +4,10 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AddressSnapshot } from '../../../../domain/address-snapshot';
 import { Order } from '../../../../domain/order';
 import {
+  OrderPaymentMethod,
+  OrderPaymentStatus,
+} from '../../../../domain/order-enums';
+import {
   CreateOrderItemRow,
   CreateOrderRow,
   CreateSubOrderRow,
@@ -170,7 +174,12 @@ export class OrderRelationalRepository implements OrderAbstractRepository {
     // then hydrate the page with the joined Order in one shot.
     const idPageQb = subOrderRepo
       .createQueryBuilder('so')
-      .where('so.vendor_id = :vendorId', { vendorId: opts.vendorId });
+      .innerJoin('so.order', 'o')
+      .where('so.vendor_id = :vendorId', { vendorId: opts.vendorId })
+      .andWhere('(o.payment_method = :cod OR o.payment_status = :collected)', {
+        cod: OrderPaymentMethod.COD,
+        collected: OrderPaymentStatus.COLLECTED,
+      });
     if (opts.status) {
       idPageQb.andWhere('so.fulfillment_status = :status', {
         status: opts.status,
@@ -240,6 +249,10 @@ export class OrderRelationalRepository implements OrderAbstractRepository {
       .leftJoinAndSelect('so.items', 'oi')
       .where('so.id = :id', { id: subOrderId })
       .andWhere('so.vendor_id = :vendorId', { vendorId })
+      .andWhere('(o.payment_method = :cod OR o.payment_status = :collected)', {
+        cod: OrderPaymentMethod.COD,
+        collected: OrderPaymentStatus.COLLECTED,
+      })
       .orderBy('oi.created_at', 'ASC')
       .getOne();
 
