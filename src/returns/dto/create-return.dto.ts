@@ -16,7 +16,7 @@ import { ReturnReason } from '../domain/return-enums';
 
 export class CreateReturnItemDto {
   @ApiProperty()
-  @IsUUID('4')
+  @IsUUID()
   orderItemId!: string;
 
   @ApiProperty({ minimum: 1 })
@@ -46,6 +46,6 @@ export class CreateReturnDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(5)
-  @IsUUID('4', { each: true })
+  @IsUUID(undefined, { each: true })
   fileIds?: string[];
 }
