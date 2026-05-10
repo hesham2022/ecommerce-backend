@@ -39,6 +39,7 @@ import { ShippingZonesModule } from './shipping-zones/shipping-zones.module';
 import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ReturnsModule } from './returns/returns.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ChatModule } from './chat/chat.module';
 import { FcmModule } from './fcm/fcm.module';
@@ -118,6 +119,7 @@ const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
     CartModule,
     OrdersModule,
     PaymentsModule,
+    ReturnsModule,
     ReviewsModule,
     FcmModule,
     ChatModule,
