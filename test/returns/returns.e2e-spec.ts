@@ -247,4 +247,221 @@ describe('Returns / RMA (e2e)', () => {
     ).find((s) => s.id === subOrderId);
     expect(so?.fulfillmentStatus).toBe('RETURNED');
   }, 60000);
+
+  it('should reject a return on a sub-order that is not DELIVERED', async () => {
+    // Register a second buyer, place a COD order, but DO NOT drive the sub-order
+    // through fulfillment — it stays at AWAITING_CONFIRMATION.
+    const buyer2Email = `rma-buyer2-${ts}@example.com`;
+    const buyer2Password = 'Pass1234!';
+    await request(APP_URL).post('/api/v1/auth/email/register').send({
+      email: buyer2Email,
+      password: buyer2Password,
+      firstName: 'Buyer2',
+      lastName: 'Test',
+    });
+    const login = await request(APP_URL)
+      .post('/api/v1/auth/email/login')
+      .send({ email: buyer2Email, password: buyer2Password });
+    const tok = login.body.token as string;
+    await request(APP_URL)
+      .post('/api/v1/cart/items')
+      .set('Authorization', `Bearer ${tok}`)
+      .send({ variantId, quantity: 1 });
+    const place = await request(APP_URL)
+      .post('/api/v1/orders')
+      .set('Authorization', `Bearer ${tok}`)
+      .set('Idempotency-Key', validKey('place2'))
+      .send({ address: saAddress, paymentMethod: 'COD' });
+    const oid2 = place.body.id as string;
+    const sid2 = place.body.subOrders[0].id as string;
+    const oii2 = place.body.subOrders[0].items[0].id as string;
+
+    const res = await request(APP_URL)
+      .post(`/api/v1/orders/${oid2}/suborders/${sid2}/returns`)
+      .set('Authorization', `Bearer ${tok}`)
+      .send({
+        items: [{ orderItemId: oii2, quantity: 1 }],
+        reason: 'DAMAGED',
+      });
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/DELIVERED/i);
+  }, 60000);
+
+  it('should reject reason=OTHER without reasonNote', async () => {
+    // Fresh order, drive to DELIVERED, then try to open RMA with reason=OTHER
+    // and no reasonNote.
+    await request(APP_URL)
+      .post('/api/v1/cart/items')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ variantId, quantity: 1 });
+    const place = await request(APP_URL)
+      .post('/api/v1/orders')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .set('Idempotency-Key', validKey('other'))
+      .send({ address: saAddress, paymentMethod: 'COD' });
+    const oid3 = place.body.id as string;
+    const sid3 = place.body.subOrders[0].id as string;
+    const oii3 = place.body.subOrders[0].items[0].id as string;
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid3}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({ status: 'CONFIRMED' });
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid3}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({ status: 'PACKED' });
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid3}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({
+        status: 'SHIPPED',
+        trackingNumber: 'TRK-OUT-OTHER',
+        courierName: 'Aramex',
+      });
+    await request(APP_URL)
+      .post(`/api/v1/orders/${oid3}/suborders/${sid3}/confirm-delivery`)
+      .set('Authorization', `Bearer ${buyerToken}`);
+
+    const res = await request(APP_URL)
+      .post(`/api/v1/orders/${oid3}/suborders/${sid3}/returns`)
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ items: [{ orderItemId: oii3, quantity: 1 }], reason: 'OTHER' });
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/reasonNote/i);
+  }, 60000);
+
+  it('should reject quantity > ordered', async () => {
+    // Fresh order with quantity 1, then try to open RMA with quantity 99.
+    await request(APP_URL)
+      .post('/api/v1/cart/items')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ variantId, quantity: 1 });
+    const place = await request(APP_URL)
+      .post('/api/v1/orders')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .set('Idempotency-Key', validKey('big'))
+      .send({ address: saAddress, paymentMethod: 'COD' });
+    const oid4 = place.body.id as string;
+    const sid4 = place.body.subOrders[0].id as string;
+    const oii4 = place.body.subOrders[0].items[0].id as string;
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid4}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({ status: 'CONFIRMED' });
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid4}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({ status: 'PACKED' });
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid4}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({
+        status: 'SHIPPED',
+        trackingNumber: 'TRK-OUT-BIG',
+        courierName: 'Aramex',
+      });
+    await request(APP_URL)
+      .post(`/api/v1/orders/${oid4}/suborders/${sid4}/confirm-delivery`)
+      .set('Authorization', `Bearer ${buyerToken}`);
+
+    const res = await request(APP_URL)
+      .post(`/api/v1/orders/${oid4}/suborders/${sid4}/returns`)
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({
+        items: [{ orderItemId: oii4, quantity: 99 }],
+        reason: 'DAMAGED',
+      });
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/quantity/i);
+  }, 60000);
+
+  it('should return 404 when another buyer reads the RMA', async () => {
+    const otherEmail = `rma-other-${ts}@example.com`;
+    const otherPassword = 'Pass1234!';
+    await request(APP_URL).post('/api/v1/auth/email/register').send({
+      email: otherEmail,
+      password: otherPassword,
+      firstName: 'Other',
+      lastName: 'Buyer',
+    });
+    const oLogin = await request(APP_URL)
+      .post('/api/v1/auth/email/login')
+      .send({ email: otherEmail, password: otherPassword });
+    const otherTok = oLogin.body.token as string;
+    const res = await request(APP_URL)
+      .get(`/api/v1/returns/${returnId}`)
+      .set('Authorization', `Bearer ${otherTok}`);
+    expect(res.status).toBe(404);
+  }, 60000);
+
+  it('should reject vendor PATCH from a different vendor (404)', async () => {
+    // Open a fresh RMA via the original buyer + vendor 1 and leave it at REQUESTED.
+    await request(APP_URL)
+      .post('/api/v1/cart/items')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ variantId, quantity: 1 });
+    const place = await request(APP_URL)
+      .post('/api/v1/orders')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .set('Idempotency-Key', validKey('v2'))
+      .send({ address: saAddress, paymentMethod: 'COD' });
+    const oid = place.body.id as string;
+    const sid = place.body.subOrders[0].id as string;
+    const oii = place.body.subOrders[0].items[0].id as string;
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({ status: 'CONFIRMED' });
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({ status: 'PACKED' });
+    await request(APP_URL)
+      .patch(`/api/v1/vendor/suborders/${sid}/status`)
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({
+        status: 'SHIPPED',
+        trackingNumber: 'TRK-OUT-V2',
+        courierName: 'Aramex',
+      });
+    await request(APP_URL)
+      .post(`/api/v1/orders/${oid}/suborders/${sid}/confirm-delivery`)
+      .set('Authorization', `Bearer ${buyerToken}`);
+    const open = await request(APP_URL)
+      .post(`/api/v1/orders/${oid}/suborders/${sid}/returns`)
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({
+        items: [{ orderItemId: oii, quantity: 1 }],
+        reason: 'WRONG_ITEM',
+      });
+    expect(open.status).toBe(201);
+    const newReturnId = open.body.id as string;
+
+    // Sign up vendor 2 (use `name`, not `shopName`).
+    const v2Email = `rma-vendor2-${ts}@example.com`;
+    const v2Signup = await request(APP_URL)
+      .post('/api/v1/vendor/signup')
+      .send({
+        email: v2Email,
+        password: 'Pass1234!',
+        firstName: 'Vendor',
+        lastName: 'Two',
+        name: `RMA Shop 2 ${ts}`,
+      });
+    const v2VendorId = v2Signup.body.id as string;
+    await request(APP_URL)
+      .patch(`/api/v1/admin/vendors/${v2VendorId}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    const v2Login = await request(APP_URL)
+      .post('/api/v1/auth/email/login')
+      .send({ email: v2Email, password: 'Pass1234!' });
+    const v2Token = v2Login.body.token as string;
+
+    // Vendor 2 tries to approve vendor 1's RMA — must 404 (no existence leak).
+    const res = await request(APP_URL)
+      .patch(`/api/v1/vendor/returns/${newReturnId}`)
+      .set('Authorization', `Bearer ${v2Token}`)
+      .send({ status: 'APPROVED' });
+    expect(res.status).toBe(404);
+  }, 60000);
 });
