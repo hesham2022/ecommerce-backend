@@ -158,4 +158,12 @@ export class OrdersService {
       },
     };
   }
+
+  async markPaid(orderId: string): Promise<void> {
+    await this.orders.markPaid(orderId);
+  }
+
+  async cancelForFailedPayment(orderId: string, reason: string): Promise<void> {
+    await this.orders.cancelForFailedPayment(orderId, reason);
+  }
 }
