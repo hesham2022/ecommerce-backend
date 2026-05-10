@@ -281,6 +281,29 @@ export class OrderRelationalRepository implements OrderAbstractRepository {
     );
   }
 
+  async findOrderIdForSubOrder(subOrderId: string): Promise<string | null> {
+    const row = await this.dataSource
+      .getRepository(SubOrderEntity)
+      .findOne({ where: { id: subOrderId }, select: { orderId: true } });
+    return row?.orderId ?? null;
+  }
+
+  async flipSubOrderToReturnedIfDelivered(
+    subOrderId: string,
+  ): Promise<boolean> {
+    const result = await this.dataSource
+      .getRepository(SubOrderEntity)
+      .createQueryBuilder()
+      .update()
+      .set({ fulfillmentStatus: SubOrderFulfillmentStatus.RETURNED })
+      .where('id = :id', { id: subOrderId })
+      .andWhere('fulfillment_status = :delivered', {
+        delivered: SubOrderFulfillmentStatus.DELIVERED,
+      })
+      .execute();
+    return (result.affected ?? 0) > 0;
+  }
+
   async cancelForFailedPayment(orderId: string, reason: string): Promise<void> {
     await this.dataSource.transaction(async (em) => {
       await em.update(

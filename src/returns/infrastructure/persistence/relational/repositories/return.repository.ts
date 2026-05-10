@@ -196,6 +196,23 @@ export class ReturnRelationalRepository implements ReturnAbstractRepository {
     return new Map(rows.map((r) => [r.orderItemId, Number(r.qty)]));
   }
 
+  async sumClosedQuantitiesByOrderItem(
+    input: CountOpenForOrderItemsInput,
+  ): Promise<Map<string, number>> {
+    if (input.orderItemIds.length === 0) return new Map();
+    const rows = await this.dataSource
+      .getRepository(ReturnItemEntity)
+      .createQueryBuilder('ri')
+      .innerJoin('ri.returnRequest', 'rr')
+      .select('ri.order_item_id', 'orderItemId')
+      .addSelect('COALESCE(SUM(ri.quantity), 0)', 'qty')
+      .where('ri.order_item_id IN (:...ids)', { ids: input.orderItemIds })
+      .andWhere('rr.status = :closed', { closed: ReturnStatus.CLOSED })
+      .groupBy('ri.order_item_id')
+      .getRawMany<{ orderItemId: string; qty: string }>();
+    return new Map(rows.map((r) => [r.orderItemId, Number(r.qty)]));
+  }
+
   async markApproved(input: MarkApprovedInput): Promise<Return> {
     return this.dataSource.transaction(async (em) => {
       const requestRepo = em.getRepository(ReturnRequestEntity);

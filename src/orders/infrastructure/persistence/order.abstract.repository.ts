@@ -118,4 +118,19 @@ export abstract class OrderAbstractRepository {
     orderId: string,
     reason: string,
   ): Promise<void>;
+
+  /**
+   * Returns the orderId for a given subOrderId, or null if not found.
+   * Used by the returns service to hydrate the parent order during
+   * the RECEIVED transition.
+   */
+  abstract findOrderIdForSubOrder(subOrderId: string): Promise<string | null>;
+
+  /**
+   * Atomically flips a sub-order's fulfillmentStatus to RETURNED if and
+   * only if it is currently DELIVERED. Returns true if the flip happened.
+   */
+  abstract flipSubOrderToReturnedIfDelivered(
+    subOrderId: string,
+  ): Promise<boolean>;
 }

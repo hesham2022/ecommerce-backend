@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { uuidv7Generate } from '../utils/uuid';
 import { OrderAbstractRepository } from '../orders/infrastructure/persistence/order.abstract.repository';
-import { Order } from '../orders/domain/order';
 import { SubOrderFulfillmentStatus } from '../orders/domain/order-enums';
 import { FilesService } from '../files/files.service';
 import { VendorsService } from '../vendors/vendors.service';
@@ -280,7 +279,9 @@ export class ReturnsService {
   private async computeStockIncrements(
     r: Return,
   ): Promise<Array<{ variantId: string; delta: number }>> {
-    const order = await this.findOrderForSubOrder(r.subOrderId);
+    const orderId = await this.orders.findOrderIdForSubOrder(r.subOrderId);
+    if (!orderId) return [];
+    const order = await this.orders.findHydratedById(orderId);
     if (!order) return [];
     const subOrder = order.subOrders?.find((s) => s.id === r.subOrderId);
     if (!subOrder) return [];
@@ -295,26 +296,32 @@ export class ReturnsService {
   }
 
   /**
-   * Loads the parent order for a sub-order. Stubbed in Task 8 — returns null
-   * so `computeStockIncrements` falls back to an empty list. Task 9 wires this
-   * up to a new `OrderAbstractRepository.findOrderIdForSubOrder` helper and
-   * the existing `findHydratedById` path.
-   */
-  // eslint-disable-next-line @typescript-eslint/require-await
-  private async findOrderForSubOrder(
-    subOrderId: string,
-  ): Promise<Order | null> {
-    void subOrderId;
-    return null;
-  }
-
-  /**
    * Attempts to flip the parent sub-order to RETURNED once a return is
-   * CLOSED. Stubbed in Task 8 — Task 9 implements the auto-flip via the
-   * orders repo.
+   * CLOSED. Only flips when every order item's CLOSED-return quantity has
+   * met or exceeded the originally-ordered quantity.
    */
-  // eslint-disable-next-line @typescript-eslint/require-await
   private async tryFlipSubOrderToReturned(subOrderId: string): Promise<void> {
-    void subOrderId;
+    const orderId = await this.orders.findOrderIdForSubOrder(subOrderId);
+    if (!orderId) return;
+    const order = await this.orders.findHydratedById(orderId);
+    if (!order) return;
+    const subOrder = order.subOrders?.find((s) => s.id === subOrderId);
+    if (!subOrder) return;
+
+    // Sum closed-RMA quantities by orderItemId. Only CLOSED returns count
+    // toward "fully returned" — REJECTED never counts; in-progress states
+    // (REQUESTED..REFUNDED) don't yet finalize the loss.
+    const orderItemIds = (subOrder.items ?? []).map((oi) => oi.id);
+    if (orderItemIds.length === 0) return;
+    const closedSums = await this.returns.sumClosedQuantitiesByOrderItem({
+      orderItemIds,
+    });
+
+    const allReturned = (subOrder.items ?? []).every((oi) => {
+      return (closedSums.get(oi.id) ?? 0) >= oi.quantity;
+    });
+    if (allReturned) {
+      await this.orders.flipSubOrderToReturnedIfDelivered(subOrderId);
+    }
   }
 }

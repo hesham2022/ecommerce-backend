@@ -106,6 +106,15 @@ export abstract class ReturnAbstractRepository {
     input: CountOpenForOrderItemsInput,
   ): Promise<Map<string, number>>;
 
+  /**
+   * Like sumNonRejectedQuantitiesByOrderItem but only counts CLOSED returns.
+   * Used to determine whether all items of a sub-order have been fully
+   * returned and the sub-order should flip to RETURNED.
+   */
+  abstract sumClosedQuantitiesByOrderItem(
+    input: CountOpenForOrderItemsInput,
+  ): Promise<Map<string, number>>;
+
   abstract markApproved(input: MarkApprovedInput): Promise<Return>;
   abstract markRejected(input: MarkRejectedInput): Promise<Return>;
   abstract markShippedBack(input: MarkShippedBackInput): Promise<Return>;

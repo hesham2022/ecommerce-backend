@@ -59,6 +59,7 @@ describe('ReturnsService', () => {
       sumNonRejectedQuantitiesByOrderItem: jest
         .fn()
         .mockResolvedValue(new Map()),
+      sumClosedQuantitiesByOrderItem: jest.fn().mockResolvedValue(new Map()),
       markApproved: jest.fn(),
       markRejected: jest.fn(),
       markShippedBack: jest.fn(),
@@ -69,6 +70,8 @@ describe('ReturnsService', () => {
 
     ordersRepo = {
       findHydratedById: jest.fn(),
+      findOrderIdForSubOrder: jest.fn(),
+      flipSubOrderToReturnedIfDelivered: jest.fn(),
     } as unknown as jest.Mocked<OrderAbstractRepository>;
 
     filesService = {
@@ -429,10 +432,11 @@ describe('ReturnsService', () => {
       ).rejects.toThrow(/rejectReason/i);
     });
 
-    it.skip('should mark RECEIVED with restock and pass stockIncrements', async () => {
+    it('should mark RECEIVED with restock and pass stockIncrements', async () => {
       const r = existingApproveable();
       r.status = ReturnStatus.SHIPPED_BACK;
       returnsRepo.findById.mockResolvedValue(r);
+      ordersRepo.findOrderIdForSubOrder.mockResolvedValue('order-1');
       ordersRepo.findHydratedById.mockResolvedValue({
         ...mockOrder(),
         subOrders: [
@@ -495,6 +499,106 @@ describe('ReturnsService', () => {
           targetStatus: ReturnStatus.APPROVED,
         }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should auto-flip sub-order to RETURNED when all items closed', async () => {
+      const r = existingApproveable();
+      r.status = ReturnStatus.REFUNDED;
+      returnsRepo.findById.mockResolvedValue(r);
+      returnsRepo.markClosed.mockResolvedValue({
+        ...r,
+        status: ReturnStatus.CLOSED,
+        subOrderId: 'so-1',
+      } as never);
+      ordersRepo.findOrderIdForSubOrder = jest
+        .fn()
+        .mockResolvedValue('order-1');
+      ordersRepo.findHydratedById = jest.fn().mockResolvedValue(
+        mockOrder({
+          subOrders: [
+            {
+              id: 'so-1',
+              vendorId: 'vendor-1',
+              fulfillmentStatus: SubOrderFulfillmentStatus.DELIVERED,
+              deliveredAt: DELIVERED_AT,
+              items: [
+                {
+                  id: 'oi-1',
+                  variantId: 'var-1',
+                  quantity: 2,
+                  unitPriceSnapshot: '5000',
+                },
+              ],
+            },
+          ] as never,
+        }),
+      );
+      returnsRepo.sumClosedQuantitiesByOrderItem = jest
+        .fn()
+        .mockResolvedValue(new Map([['oi-1', 2]]));
+      ordersRepo.flipSubOrderToReturnedIfDelivered = jest
+        .fn()
+        .mockResolvedValue(true);
+
+      await service.vendorTransition({
+        vendorId: 'vendor-1',
+        returnId: 'r-1',
+        targetStatus: ReturnStatus.CLOSED,
+      });
+
+      expect(ordersRepo.flipSubOrderToReturnedIfDelivered).toHaveBeenCalledWith(
+        'so-1',
+      );
+    });
+
+    it('should not flip sub-order when only partial items closed', async () => {
+      const r = existingApproveable();
+      r.status = ReturnStatus.REFUNDED;
+      returnsRepo.findById.mockResolvedValue(r);
+      returnsRepo.markClosed.mockResolvedValue({
+        ...r,
+        status: ReturnStatus.CLOSED,
+        subOrderId: 'so-1',
+      } as never);
+      ordersRepo.findOrderIdForSubOrder = jest
+        .fn()
+        .mockResolvedValue('order-1');
+      ordersRepo.findHydratedById = jest.fn().mockResolvedValue(
+        mockOrder({
+          subOrders: [
+            {
+              id: 'so-1',
+              vendorId: 'vendor-1',
+              fulfillmentStatus: SubOrderFulfillmentStatus.DELIVERED,
+              deliveredAt: DELIVERED_AT,
+              items: [
+                {
+                  id: 'oi-1',
+                  variantId: 'var-1',
+                  quantity: 2,
+                  unitPriceSnapshot: '5000',
+                },
+              ],
+            },
+          ] as never,
+        }),
+      );
+      returnsRepo.sumClosedQuantitiesByOrderItem = jest
+        .fn()
+        .mockResolvedValue(new Map([['oi-1', 1]]));
+      ordersRepo.flipSubOrderToReturnedIfDelivered = jest
+        .fn()
+        .mockResolvedValue(false);
+
+      await service.vendorTransition({
+        vendorId: 'vendor-1',
+        returnId: 'r-1',
+        targetStatus: ReturnStatus.CLOSED,
+      });
+
+      expect(
+        ordersRepo.flipSubOrderToReturnedIfDelivered,
+      ).not.toHaveBeenCalled();
     });
   });
 });
