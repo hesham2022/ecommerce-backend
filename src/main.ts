@@ -16,7 +16,7 @@ import { RequestContextInterceptor } from './request-context/request-context.int
 import { ChatRedisIoAdapter } from './chat/realtime/chat-redis-io.adapter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   useContainer(app.select(AppModule), { fallbackOnErrors: true });
   const configService = app.get(ConfigService<AllConfigType>);
 
