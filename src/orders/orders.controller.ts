@@ -26,6 +26,7 @@ import type { Request, Response } from 'express';
 import { CheckoutService } from './checkout.service';
 import { Order } from './domain/order';
 import { OrderEvent } from './domain/order-event';
+import { OrderPaymentMethod } from './domain/order-enums';
 import { SubOrder } from './domain/sub-order';
 import { PlaceOrderDto } from './dto/place-order.dto';
 import { OrderListQueryDto } from './dto/order-list-query.dto';
@@ -34,8 +35,18 @@ import { FulfillmentService } from './fulfillment.service';
 import { IdempotencyHelper } from './idempotency.helper';
 import { OrdersService } from './orders.service';
 import { ProductsService } from '../products/products.service';
+import { PaymentsService } from '../payments/payments.service';
 
 const IDEMPOTENCY_SCOPE = 'orders';
+
+export type PlaceOrderResponse = Order & {
+  payment?: {
+    id: string;
+    provider: string;
+    clientSecret: string | null;
+    status: string;
+  };
+};
 
 @ApiTags('Buyer · Orders')
 @ApiBearerAuth('jwt')
@@ -48,6 +59,7 @@ export class OrdersController {
     private readonly idempotency: IdempotencyHelper,
     private readonly fulfillment: FulfillmentService,
     private readonly products: ProductsService,
+    private readonly payments: PaymentsService,
   ) {}
 
   @Post()
@@ -66,8 +78,14 @@ export class OrdersController {
     @Res({ passthrough: true }) res: Response,
     @Body() dto: PlaceOrderDto,
     @Headers('idempotency-key') rawKey: string | undefined,
-  ): Promise<Order> {
+  ): Promise<PlaceOrderResponse> {
     const userId = (req.user as { id: number }).id;
+
+    if (dto.paymentMethod === OrderPaymentMethod.CARD && !dto.paymentProvider) {
+      throw new UnprocessableEntityException(
+        'paymentProvider is required when paymentMethod is CARD',
+      );
+    }
 
     if (!rawKey || !rawKey.trim()) {
       throw new UnprocessableEntityException('Idempotency-Key header required');
@@ -80,7 +98,7 @@ export class OrdersController {
     }
 
     // Replay path: short-circuit if the slot already holds a result.
-    const existing = await this.idempotency.get<Order>(
+    const existing = await this.idempotency.get<PlaceOrderResponse>(
       IDEMPOTENCY_SCOPE,
       userId,
       key,
@@ -100,7 +118,7 @@ export class OrdersController {
       key,
     );
     if (!claimed) {
-      const second = await this.idempotency.get<Order>(
+      const second = await this.idempotency.get<PlaceOrderResponse>(
         IDEMPOTENCY_SCOPE,
         userId,
         key,
@@ -127,9 +145,37 @@ export class OrdersController {
         },
         dto.paymentMethod,
       );
-      await this.idempotency.setResult(IDEMPOTENCY_SCOPE, userId, key, order);
+
+      let response: PlaceOrderResponse = order;
+      if (
+        dto.paymentMethod === OrderPaymentMethod.CARD &&
+        dto.paymentProvider !== undefined
+      ) {
+        const payment = await this.payments.createForOrder({
+          orderId: order.id,
+          provider: dto.paymentProvider,
+          amountMinor: order.totalMinor,
+          currencyCode: order.currencyCode,
+        });
+        response = {
+          ...order,
+          payment: {
+            id: payment.id,
+            provider: payment.provider,
+            clientSecret: payment.clientSecret,
+            status: payment.status,
+          },
+        };
+      }
+
+      await this.idempotency.setResult(
+        IDEMPOTENCY_SCOPE,
+        userId,
+        key,
+        response,
+      );
       res.status(HttpStatus.CREATED);
-      return order;
+      return response;
     } catch (err) {
       // Free the slot so the buyer can retry with the same key.
       await this.idempotency.clear(IDEMPOTENCY_SCOPE, userId, key);
@@ -226,7 +272,7 @@ export class OrdersController {
    * Replays go through Redis JSON, so Date fields come back as ISO strings.
    * Re-coerce the timestamps so the response shape matches a fresh placement.
    */
-  private rehydrateDates(order: Order): Order {
+  private rehydrateDates(order: PlaceOrderResponse): PlaceOrderResponse {
     if (typeof order.placedAt === 'string') {
       order.placedAt = new Date(order.placedAt);
     }
