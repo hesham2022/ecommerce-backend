@@ -1,5 +1,9 @@
 import { UnprocessableEntityException } from '@nestjs/common';
-import { SubOrderFulfillmentStatus } from './domain/order-enums';
+import {
+  OrderPaymentMethod,
+  OrderPaymentStatus,
+  SubOrderFulfillmentStatus,
+} from './domain/order-enums';
 
 /**
  * Allowed forward transitions for a SubOrder, driven by the vendor.
@@ -70,4 +74,16 @@ export function assertBuyerCanConfirmDelivery(
       `Cannot confirm delivery from ${from}; sub-order must be SHIPPED`,
     );
   }
+}
+
+/**
+ * Vendors must not see sub-orders for CARD orders that have not been paid.
+ * COD orders are always visible (cash collected at delivery).
+ */
+export function isSubOrderVendorVisible(opts: {
+  paymentMethod: OrderPaymentMethod;
+  paymentStatus: OrderPaymentStatus;
+}): boolean {
+  if (opts.paymentMethod === OrderPaymentMethod.COD) return true;
+  return opts.paymentStatus === OrderPaymentStatus.COLLECTED;
 }

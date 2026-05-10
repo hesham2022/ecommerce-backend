@@ -4,6 +4,13 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AddressSnapshot } from '../../../../domain/address-snapshot';
 import { Order } from '../../../../domain/order';
 import {
+  OrderEventType,
+  OrderPaymentMethod,
+  OrderPaymentStatus,
+  SubOrderFulfillmentStatus,
+} from '../../../../domain/order-enums';
+import { uuidv7Generate } from '../../../../../utils/uuid';
+import {
   CreateOrderItemRow,
   CreateOrderRow,
   CreateSubOrderRow,
@@ -15,6 +22,7 @@ import {
   VendorOrderListResult,
 } from '../../order.abstract.repository';
 import { OrderEntity } from '../entities/order.entity';
+import { OrderEventEntity } from '../entities/order-event.entity';
 import { OrderItemEntity } from '../entities/order-item.entity';
 import { SubOrderEntity } from '../entities/sub-order.entity';
 import { OrderMapper } from '../mappers/order.mapper';
@@ -170,7 +178,12 @@ export class OrderRelationalRepository implements OrderAbstractRepository {
     // then hydrate the page with the joined Order in one shot.
     const idPageQb = subOrderRepo
       .createQueryBuilder('so')
-      .where('so.vendor_id = :vendorId', { vendorId: opts.vendorId });
+      .innerJoin('so.order', 'o')
+      .where('so.vendor_id = :vendorId', { vendorId: opts.vendorId })
+      .andWhere('(o.payment_method = :cod OR o.payment_status = :collected)', {
+        cod: OrderPaymentMethod.COD,
+        collected: OrderPaymentStatus.COLLECTED,
+      });
     if (opts.status) {
       idPageQb.andWhere('so.fulfillment_status = :status', {
         status: opts.status,
@@ -240,6 +253,10 @@ export class OrderRelationalRepository implements OrderAbstractRepository {
       .leftJoinAndSelect('so.items', 'oi')
       .where('so.id = :id', { id: subOrderId })
       .andWhere('so.vendor_id = :vendorId', { vendorId })
+      .andWhere('(o.payment_method = :cod OR o.payment_status = :collected)', {
+        cod: OrderPaymentMethod.COD,
+        collected: OrderPaymentStatus.COLLECTED,
+      })
       .orderBy('oi.created_at', 'ASC')
       .getOne();
 
@@ -255,5 +272,54 @@ export class OrderRelationalRepository implements OrderAbstractRepository {
         currencyCode: row.order.currencyCode,
       },
     };
+  }
+
+  async markPaid(orderId: string): Promise<void> {
+    await this.orderRepo.update(
+      { id: orderId },
+      { paymentStatus: OrderPaymentStatus.COLLECTED },
+    );
+  }
+
+  async cancelForFailedPayment(orderId: string, reason: string): Promise<void> {
+    await this.dataSource.transaction(async (em) => {
+      await em.update(
+        OrderEntity,
+        { id: orderId },
+        { paymentStatus: OrderPaymentStatus.FAILED },
+      );
+
+      // Find sub-orders still in AWAITING_CONFIRMATION; we audit each one
+      // we transition into CANCELLED so the order_event timeline shows the
+      // forced transition with its reason.
+      const sosToCancel = await em.find(SubOrderEntity, {
+        where: {
+          orderId,
+          fulfillmentStatus: SubOrderFulfillmentStatus.AWAITING_CONFIRMATION,
+        },
+      });
+
+      if (sosToCancel.length === 0) return;
+
+      await em.update(
+        SubOrderEntity,
+        {
+          orderId,
+          fulfillmentStatus: SubOrderFulfillmentStatus.AWAITING_CONFIRMATION,
+        },
+        { fulfillmentStatus: SubOrderFulfillmentStatus.CANCELLED },
+      );
+
+      const events = sosToCancel.map((so) => ({
+        id: uuidv7Generate(),
+        subOrderId: so.id,
+        eventType: OrderEventType.STATUS_CHANGED,
+        fromStatus: SubOrderFulfillmentStatus.AWAITING_CONFIRMATION,
+        toStatus: SubOrderFulfillmentStatus.CANCELLED,
+        actorUserId: null,
+        payload: { reason: `payment_failed: ${reason}` },
+      }));
+      await em.insert(OrderEventEntity, events);
+    });
   }
 }

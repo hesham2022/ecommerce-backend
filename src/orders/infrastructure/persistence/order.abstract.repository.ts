@@ -113,4 +113,9 @@ export abstract class OrderAbstractRepository {
   ): Promise<VendorOrderDetail | null>;
   /** Used by the placeOrder transaction internally for re-loading the cart. */
   abstract entityManager(): EntityManager;
+  abstract markPaid(orderId: string): Promise<void>;
+  abstract cancelForFailedPayment(
+    orderId: string,
+    reason: string,
+  ): Promise<void>;
 }

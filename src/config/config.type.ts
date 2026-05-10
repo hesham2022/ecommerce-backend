@@ -7,6 +7,7 @@ import { FileConfig } from '../files/config/file-config.type';
 import { GoogleConfig } from '../auth-google/config/google-config.type';
 import { MailConfig } from '../mail/config/mail-config.type';
 import { RedisConfig } from '../redis/config/redis.config';
+import { StripeConfig } from '../payments/config/stripe-config.type';
 
 export type AllConfigType = {
   app: AppConfig;
@@ -18,4 +19,5 @@ export type AllConfigType = {
   google: GoogleConfig;
   mail: MailConfig;
   redis: RedisConfig;
+  stripe: StripeConfig;
 };

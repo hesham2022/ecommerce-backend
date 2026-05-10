@@ -1,10 +1,15 @@
 import { UnprocessableEntityException } from '@nestjs/common';
-import { SubOrderFulfillmentStatus } from './domain/order-enums';
+import {
+  OrderPaymentMethod,
+  OrderPaymentStatus,
+  SubOrderFulfillmentStatus,
+} from './domain/order-enums';
 import {
   assertBuyerCanConfirmDelivery,
   assertVendorTransition,
   canBuyerConfirmDelivery,
   canVendorTransition,
+  isSubOrderVendorVisible,
   VendorTargetStatus,
 } from './sub-order-state-machine';
 
@@ -143,5 +148,52 @@ describe('SubOrder state machine', () => {
         assertBuyerCanConfirmDelivery(SubOrderFulfillmentStatus.PACKED),
       ).toThrow(UnprocessableEntityException);
     });
+  });
+});
+
+describe('isSubOrderVendorVisible', () => {
+  it('should hide unpaid CARD orders from vendors', () => {
+    expect(
+      isSubOrderVendorVisible({
+        paymentMethod: OrderPaymentMethod.CARD,
+        paymentStatus: OrderPaymentStatus.PENDING,
+      }),
+    ).toBe(false);
+  });
+
+  it('should show paid CARD orders to vendors', () => {
+    expect(
+      isSubOrderVendorVisible({
+        paymentMethod: OrderPaymentMethod.CARD,
+        paymentStatus: OrderPaymentStatus.COLLECTED,
+      }),
+    ).toBe(true);
+  });
+
+  it('should always show COD orders to vendors regardless of payment status', () => {
+    expect(
+      isSubOrderVendorVisible({
+        paymentMethod: OrderPaymentMethod.COD,
+        paymentStatus: OrderPaymentStatus.PENDING,
+      }),
+    ).toBe(true);
+  });
+
+  it('should show COD orders even when collected', () => {
+    expect(
+      isSubOrderVendorVisible({
+        paymentMethod: OrderPaymentMethod.COD,
+        paymentStatus: OrderPaymentStatus.COLLECTED,
+      }),
+    ).toBe(true);
+  });
+
+  it('should hide failed CARD orders from vendors', () => {
+    expect(
+      isSubOrderVendorVisible({
+        paymentMethod: OrderPaymentMethod.CARD,
+        paymentStatus: OrderPaymentStatus.FAILED,
+      }),
+    ).toBe(false);
   });
 });
