@@ -40,7 +40,12 @@ export class PaymentEntity extends EntityRelationalHelper {
   @Column({ name: 'provider_intent_id', length: 255 })
   providerIntentId!: string;
 
-  @Column({ name: 'client_secret', length: 512, nullable: true })
+  @Column({
+    name: 'client_secret',
+    type: 'varchar',
+    length: 512,
+    nullable: true,
+  })
   clientSecret!: string | null;
 
   @Column({
