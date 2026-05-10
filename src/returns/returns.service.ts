@@ -172,6 +172,16 @@ export class ReturnsService {
     });
   }
 
+  async listForBuyer(opts: {
+    buyerId: number;
+    subOrderId?: string;
+    status?: ReturnStatus;
+    page: number;
+    limit: number;
+  }): Promise<{ data: Return[]; total: number }> {
+    return this.returns.listForBuyer(opts);
+  }
+
   async getByIdForBuyer(buyerId: number, returnId: string): Promise<Return> {
     const r = await this.returns.findById(returnId);
     if (!r || r.buyerId !== buyerId) {
