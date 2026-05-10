@@ -182,6 +182,16 @@ export class ReturnsService {
     return this.returns.listForBuyer(opts);
   }
 
+  async listForVendor(opts: {
+    vendorId: string;
+    subOrderId?: string;
+    status?: ReturnStatus;
+    page: number;
+    limit: number;
+  }): Promise<{ data: Return[]; total: number }> {
+    return this.returns.listForVendor(opts);
+  }
+
   async getByIdForBuyer(buyerId: number, returnId: string): Promise<Return> {
     const r = await this.returns.findById(returnId);
     if (!r || r.buyerId !== buyerId) {
