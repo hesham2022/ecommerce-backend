@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { PaymentProviderName, PaymentStatus } from '../domain/payment-enums';
@@ -46,32 +51,31 @@ const STATUS_MAP: Record<StripePaymentIntentStatus, PaymentStatus> = {
 @Injectable()
 export class StripeProvider extends PaymentProviderInterface {
   readonly name = PaymentProviderName.STRIPE;
-  private readonly stripe: Stripe.Stripe;
-  private readonly webhookSecret: string;
+  private readonly cfg: StripeConfig | undefined;
+  private stripeClient: Stripe.Stripe | undefined;
 
   constructor(config: ConfigService) {
     super();
-    const cfg = config.get<StripeConfig>('stripe');
-    if (!cfg?.secretKey || !cfg.webhookSecret) {
-      throw new Error(
-        'Stripe config is missing required keys (STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET)',
-      );
-    }
-    this.stripe = new Stripe(cfg.secretKey, {
-      apiVersion: '2026-04-22.dahlia',
-    });
-    this.webhookSecret = cfg.webhookSecret;
+    this.cfg = config.get<StripeConfig>('stripe');
+    // Intentionally lazy: COD-only environments boot fine; missing Stripe
+    // config is reported only at first CARD use (with a clear error).
   }
 
   async createIntent(input: CreateIntentInput): Promise<CreateIntentResult> {
-    const intent = (await this.stripe.paymentIntents.create({
-      amount: Number(input.amountMinor),
-      currency: input.currencyCode.toLowerCase(),
-      metadata: input.metadata,
-      automatic_payment_methods: { enabled: true },
-    })) as unknown as StripePaymentIntentLike & {
-      client_secret: string | null;
-    };
+    const stripe = this.requireStripe();
+    let intent: StripePaymentIntentLike & { client_secret: string | null };
+    try {
+      intent = (await stripe.paymentIntents.create({
+        amount: Number(input.amountMinor),
+        currency: input.currencyCode.toLowerCase(),
+        metadata: input.metadata,
+        automatic_payment_methods: { enabled: true },
+      })) as unknown as StripePaymentIntentLike & {
+        client_secret: string | null;
+      };
+    } catch (err) {
+      this.translateStripeError(err);
+    }
     return {
       providerIntentId: intent.id,
       clientSecret: intent.client_secret ?? null,
@@ -83,10 +87,12 @@ export class StripeProvider extends PaymentProviderInterface {
     rawBody: Buffer,
     signatureHeader: string,
   ): ParsedWebhookEvent {
-    const event = this.stripe.webhooks.constructEvent(
+    const stripe = this.requireStripe();
+    const webhookSecret = this.requireWebhookSecret();
+    const event = stripe.webhooks.constructEvent(
       rawBody,
       signatureHeader,
-      this.webhookSecret,
+      webhookSecret,
     );
     const intent = event.data.object as unknown as StripePaymentIntentLike;
 
@@ -107,6 +113,46 @@ export class StripeProvider extends PaymentProviderInterface {
       errorMessage: intent.last_payment_error?.message ?? null,
       raw: event as unknown as Record<string, unknown>,
     };
+  }
+
+  private requireStripe(): Stripe.Stripe {
+    if (this.stripeClient) return this.stripeClient;
+    if (!this.cfg?.secretKey) {
+      throw new InternalServerErrorException(
+        'Stripe is not configured (set STRIPE_SECRET_KEY)',
+      );
+    }
+    this.stripeClient = new Stripe(this.cfg.secretKey, {
+      apiVersion: '2026-04-22.dahlia',
+    });
+    return this.stripeClient;
+  }
+
+  private requireWebhookSecret(): string {
+    if (!this.cfg?.webhookSecret) {
+      throw new InternalServerErrorException(
+        'Stripe webhook secret is not configured (set STRIPE_WEBHOOK_SECRET)',
+      );
+    }
+    return this.cfg.webhookSecret;
+  }
+
+  private translateStripeError(err: unknown): never {
+    if (err && typeof err === 'object' && 'type' in err) {
+      const e = err as { type: string; message?: string };
+      if (e.type === 'StripeCardError') {
+        throw new UnprocessableEntityException({
+          code: 'card_declined',
+          message: e.message ?? 'Card was declined',
+        });
+      }
+      if (e.type === 'StripeInvalidRequestError') {
+        throw new BadRequestException(
+          e.message ?? 'Invalid request to payment provider',
+        );
+      }
+    }
+    throw new InternalServerErrorException('Payment provider error');
   }
 
   private mapStatus(s: StripePaymentIntentStatus): PaymentStatus {

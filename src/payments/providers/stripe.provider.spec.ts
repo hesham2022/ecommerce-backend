@@ -63,6 +63,28 @@ describe('StripeProvider', () => {
         status: PaymentStatus.REQUIRES_ACTION,
       });
     });
+
+    it('should translate StripeCardError into UnprocessableEntityException', async () => {
+      (stripeMock.paymentIntents.create as jest.Mock).mockRejectedValue({
+        type: 'StripeCardError',
+        message: 'Your card was declined',
+      });
+
+      await expect(
+        provider.createIntent({
+          orderId: 'order-uuid',
+          amountMinor: '100',
+          currencyCode: 'USD',
+          metadata: {},
+        }),
+      ).rejects.toMatchObject({
+        status: 422,
+        response: {
+          code: 'card_declined',
+          message: 'Your card was declined',
+        },
+      });
+    });
   });
 
   describe('verifyAndParseWebhook', () => {
@@ -123,6 +145,30 @@ describe('StripeProvider', () => {
       expect(() =>
         provider.verifyAndParseWebhook(Buffer.from('{}'), 'bad-sig'),
       ).toThrow('Invalid signature');
+    });
+  });
+
+  describe('boot without config', () => {
+    it('should construct without throwing when Stripe keys are missing', () => {
+      const emptyConfig = {
+        get: () => undefined,
+      } as unknown as ConfigService;
+      expect(() => new StripeProvider(emptyConfig)).not.toThrow();
+    });
+
+    it('should throw on createIntent when secretKey is missing', async () => {
+      const emptyConfig = {
+        get: () => undefined,
+      } as unknown as ConfigService;
+      const p = new StripeProvider(emptyConfig);
+      await expect(
+        p.createIntent({
+          orderId: 'o',
+          amountMinor: '100',
+          currencyCode: 'USD',
+          metadata: {},
+        }),
+      ).rejects.toThrow(/STRIPE_SECRET_KEY/);
     });
   });
 });
