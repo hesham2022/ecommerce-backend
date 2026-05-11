@@ -1,5 +1,8 @@
 import { Test } from '@nestjs/testing';
-import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { KycService } from './kyc.service';
 import { KycDocumentAbstractRepository } from './infrastructure/persistence/kyc-document.abstract.repository';
 import { FilesService } from '../files/files.service';
@@ -205,6 +208,171 @@ describe('KycService', () => {
       expect(repo.upload).toHaveBeenCalledWith(
         expect.anything(),
         KycStatus.PENDING_REVIEW,
+      );
+    });
+  });
+
+  describe('review', () => {
+    const docFixture = (overrides?: Partial<KycDocument>): KycDocument => {
+      const d = new KycDocument();
+      d.id = 'doc-1';
+      d.vendorId = 'v-1';
+      d.type = KycDocumentType.COMMERCIAL_REGISTRATION;
+      d.status = KycDocumentStatus.PENDING;
+      d.supersededAt = null;
+      d.details = {};
+      d.rejectReason = null;
+      d.submittedAt = NOW;
+      d.reviewedAt = null;
+      d.reviewedByUserId = null;
+      d.fileId = 'file-1';
+      d.createdAt = NOW;
+      d.updatedAt = NOW;
+      return Object.assign(d, overrides);
+    };
+
+    it('should approve a PENDING document', async () => {
+      repo.findById.mockResolvedValue(docFixture());
+      repo.findCurrentByVendor.mockResolvedValue(
+        new Map([[KycDocumentType.COMMERCIAL_REGISTRATION, docFixture()]]),
+      );
+      repo.review.mockResolvedValue(
+        docFixture({ status: KycDocumentStatus.APPROVED }),
+      );
+
+      await service.review({
+        documentId: 'doc-1',
+        vendorId: 'v-1',
+        status: KycDocumentStatus.APPROVED,
+        reviewedByUserId: 99,
+      });
+
+      expect(repo.review).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'doc-1',
+          vendorId: 'v-1',
+          status: KycDocumentStatus.APPROVED,
+          rejectReason: null,
+          reviewedByUserId: 99,
+          reviewedAt: NOW,
+          newVendorKycStatus: KycStatus.NOT_SUBMITTED, // only 1 of 4 present
+        }),
+      );
+    });
+
+    it('should reject a PENDING document with reason', async () => {
+      repo.findById.mockResolvedValue(docFixture());
+      repo.findCurrentByVendor.mockResolvedValue(
+        new Map([[KycDocumentType.COMMERCIAL_REGISTRATION, docFixture()]]),
+      );
+      repo.review.mockResolvedValue(
+        docFixture({
+          status: KycDocumentStatus.REJECTED,
+          rejectReason: 'unclear',
+        }),
+      );
+
+      await service.review({
+        documentId: 'doc-1',
+        vendorId: 'v-1',
+        status: KycDocumentStatus.REJECTED,
+        rejectReason: 'unclear',
+        reviewedByUserId: 99,
+      });
+
+      expect(repo.review).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: KycDocumentStatus.REJECTED,
+          rejectReason: 'unclear',
+        }),
+      );
+    });
+
+    it('should require rejectReason when status=REJECTED', async () => {
+      await expect(
+        service.review({
+          documentId: 'doc-1',
+          vendorId: 'v-1',
+          status: KycDocumentStatus.REJECTED,
+          reviewedByUserId: 99,
+        }),
+      ).rejects.toThrow(/rejectReason/i);
+    });
+
+    it('should reject status=PENDING from the review endpoint', async () => {
+      await expect(
+        service.review({
+          documentId: 'doc-1',
+          vendorId: 'v-1',
+          status: KycDocumentStatus.PENDING,
+          reviewedByUserId: 99,
+        }),
+      ).rejects.toThrow(UnprocessableEntityException);
+    });
+
+    it('should 404 when document does not exist', async () => {
+      repo.findById.mockResolvedValue(null);
+      await expect(
+        service.review({
+          documentId: 'missing',
+          vendorId: 'v-1',
+          status: KycDocumentStatus.APPROVED,
+          reviewedByUserId: 99,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should 404 when document belongs to a different vendor (cross-vendor)', async () => {
+      repo.findById.mockResolvedValue(docFixture({ vendorId: 'v-2' }));
+      await expect(
+        service.review({
+          documentId: 'doc-1',
+          vendorId: 'v-1',
+          status: KycDocumentStatus.APPROVED,
+          reviewedByUserId: 99,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should compute APPROVED aggregate when last PENDING becomes APPROVED', async () => {
+      const otherApproved = (t: KycDocumentType): KycDocument => {
+        const d = docFixture({
+          id: `doc-${t}`,
+          type: t,
+          status: KycDocumentStatus.APPROVED,
+        });
+        return d;
+      };
+      repo.findById.mockResolvedValue(docFixture()); // CR doc PENDING
+      repo.findCurrentByVendor.mockResolvedValue(
+        new Map([
+          [KycDocumentType.COMMERCIAL_REGISTRATION, docFixture()],
+          [
+            KycDocumentType.TAX_CERTIFICATE,
+            otherApproved(KycDocumentType.TAX_CERTIFICATE),
+          ],
+          [
+            KycDocumentType.IBAN_DOCUMENT,
+            otherApproved(KycDocumentType.IBAN_DOCUMENT),
+          ],
+          [KycDocumentType.OWNER_ID, otherApproved(KycDocumentType.OWNER_ID)],
+        ]),
+      );
+      repo.review.mockResolvedValue(
+        docFixture({ status: KycDocumentStatus.APPROVED }),
+      );
+
+      await service.review({
+        documentId: 'doc-1',
+        vendorId: 'v-1',
+        status: KycDocumentStatus.APPROVED,
+        reviewedByUserId: 99,
+      });
+
+      expect(repo.review).toHaveBeenCalledWith(
+        expect.objectContaining({
+          newVendorKycStatus: KycStatus.APPROVED,
+        }),
       );
     });
   });
