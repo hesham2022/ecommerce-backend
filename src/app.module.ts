@@ -46,6 +46,7 @@ import { FcmModule } from './fcm/fcm.module';
 import { AdminAuditLogModule } from './admin-audit-log/admin-audit-log.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AdminSearchModule } from './admin-search/admin-search.module';
+import { KycModule } from './kyc/kyc.module';
 
 const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
   useClass: TypeOrmConfigService,
@@ -126,6 +127,7 @@ const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
     AdminAuditLogModule,
     NotificationsModule,
     AdminSearchModule,
+    KycModule,
   ],
 })
 export class AppModule {}
