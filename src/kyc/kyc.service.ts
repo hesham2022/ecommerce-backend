@@ -11,7 +11,11 @@ import {
   KycDocumentType,
   KycStatus,
 } from './domain/kyc-enums';
-import { KycDocumentAbstractRepository } from './infrastructure/persistence/kyc-document.abstract.repository';
+import {
+  KycDocumentAbstractRepository,
+  ListForAdminOptions,
+  ListResult,
+} from './infrastructure/persistence/kyc-document.abstract.repository';
 import {
   computeKycStatus,
   KYC_EXPIRY_WARNING_DAYS,
@@ -126,6 +130,24 @@ export class KycService {
       type: opts?.type,
       includeSuperseded: opts?.includeSuperseded ?? false,
     });
+  }
+
+  /**
+   * Thin delegator over the repository for admin-facing list endpoints.
+   * Keeps controllers free of repo-injection and avoids reaching into
+   * `this.docs` from outside the service.
+   */
+  async listForAdmin(opts: ListForAdminOptions): Promise<ListResult> {
+    return this.docs.listForAdmin(opts);
+  }
+
+  /**
+   * Thin delegator over the repository for fetching a single document.
+   * Used by the admin review flow to load the doc before calling `review`,
+   * so callers don't have to reach into `this.docs` directly.
+   */
+  async findById(id: string): Promise<KycDocument | null> {
+    return this.docs.findById(id);
   }
 
   async getStatusSummary(vendorId: string): Promise<VendorKycStatusSummary> {
