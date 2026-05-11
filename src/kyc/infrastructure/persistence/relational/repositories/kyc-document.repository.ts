@@ -66,9 +66,10 @@ export class KycDocumentRelationalRepository implements KycDocumentAbstractRepos
       const saved = await docRepo.save(row);
 
       // Update vendor.kyc_status atomically.
-      await vendorRepo.update({ id: input.vendorId }, {
-        kycStatus: newVendorKycStatus,
-      } as Partial<VendorEntity>);
+      await vendorRepo.update(
+        { id: input.vendorId },
+        { kycStatus: newVendorKycStatus },
+      );
 
       return KycDocumentMapper.toDomain(saved);
     });
@@ -150,9 +151,10 @@ export class KycDocumentRelationalRepository implements KycDocumentAbstractRepos
       row.reviewedAt = input.reviewedAt;
       row.reviewedByUserId = input.reviewedByUserId;
       await docRepo.save(row);
-      await vendorRepo.update({ id: input.vendorId }, {
-        kycStatus: input.newVendorKycStatus,
-      } as Partial<VendorEntity>);
+      await vendorRepo.update(
+        { id: input.vendorId },
+        { kycStatus: input.newVendorKycStatus },
+      );
       return KycDocumentMapper.toDomain(row);
     });
   }

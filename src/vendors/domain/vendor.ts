@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { KycStatus } from '../../kyc/domain/kyc-enums';
 
 export enum VendorStatus {
   PENDING = 'PENDING',
@@ -48,6 +49,9 @@ export class Vendor {
 
   @ApiProperty({ example: 'SA', nullable: true })
   shipsFromCountry!: string | null;
+
+  @ApiProperty({ enum: KycStatus, example: KycStatus.NOT_SUBMITTED })
+  kycStatus!: KycStatus;
 
   createdAt!: Date;
   updatedAt!: Date;

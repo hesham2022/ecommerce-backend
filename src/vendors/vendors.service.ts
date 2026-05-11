@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { uuidv7Generate } from '../utils/uuid';
 import { Vendor, VendorStatus } from './domain/vendor';
@@ -12,6 +13,7 @@ import { RegionsService } from '../regions/regions.service';
 import { UsersService } from '../users/users.service';
 import { RoleEnum } from '../roles/roles.enum';
 import { StatusEnum } from '../statuses/statuses.enum';
+import { KycStatus } from '../kyc/domain/kyc-enums';
 
 const SLUG_MAX_LEN = 64;
 const SLUG_RETRY_LIMIT = 5;
@@ -62,6 +64,7 @@ export class VendorsService {
       logoFileId: null,
       bannerFileId: null,
       status,
+      kycStatus: KycStatus.NOT_SUBMITTED,
       defaultRegionId: defaultRegion.id,
       supportedRegionIds: [defaultRegion.id],
       returnWindowDays: 14,
@@ -120,6 +123,11 @@ export class VendorsService {
     const v = await this.getById(id);
     if (v.status !== VendorStatus.PENDING) {
       throw new ForbiddenException('Only PENDING vendors can be approved');
+    }
+    if (v.kycStatus !== KycStatus.APPROVED) {
+      throw new UnprocessableEntityException(
+        'Vendor cannot be activated until KYC is approved',
+      );
     }
     const updated = await this.repo.setStatus(id, VendorStatus.ACTIVE);
     await this.grantVendorRole(v.userId);

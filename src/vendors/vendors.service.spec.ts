@@ -1,5 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { VendorsService } from './vendors.service';
 import { VendorAbstractRepository } from './infrastructure/persistence/vendor.abstract.repository';
 import { Vendor, VendorStatus } from './domain/vendor';
@@ -9,6 +13,7 @@ import { UsersService } from '../users/users.service';
 import { DEFAULT_SETTINGS } from '../settings/domain/setting';
 import { Region } from '../regions/domain/region';
 import { RoleEnum } from '../roles/roles.enum';
+import { KycStatus } from '../kyc/domain/kyc-enums';
 
 describe('VendorsService', () => {
   let service: VendorsService;
@@ -39,6 +44,7 @@ describe('VendorsService', () => {
       logoFileId: null,
       bannerFileId: null,
       status: VendorStatus.PENDING,
+      kycStatus: KycStatus.APPROVED,
       defaultRegionId: region.id,
       supportedRegionIds: [region.id],
       returnWindowDays: 14,
@@ -178,6 +184,18 @@ describe('VendorsService', () => {
       );
       await expect(service.approve('v-1')).rejects.toBeInstanceOf(
         ForbiddenException,
+      );
+    });
+
+    it('should refuse approve when KYC is not APPROVED', async () => {
+      repo.findById.mockResolvedValue(
+        buildVendor({
+          status: VendorStatus.PENDING,
+          kycStatus: KycStatus.PENDING_REVIEW,
+        }),
+      );
+      await expect(service.approve('v-1')).rejects.toBeInstanceOf(
+        UnprocessableEntityException,
       );
     });
 
