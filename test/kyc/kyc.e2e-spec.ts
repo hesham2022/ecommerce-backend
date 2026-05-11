@@ -176,4 +176,77 @@ describe('Vendor KYC (e2e)', () => {
     expect(activate.status).toBe(200);
     expect(activate.body.status).toBe('ACTIVE');
   }, 120000);
+
+  // ---------------------------------------------------------------------------
+  // Edge cases. The happy-path vendor (vendorId / vendorToken) currently has
+  // all 4 documents APPROVED and is ACTIVE — we re-use it for cases that need
+  // an existing-vendor context, and supersede CR to create new PENDING rows.
+  // ---------------------------------------------------------------------------
+
+  // Set inside the "double-PENDING" test so the "missing rejectReason" test
+  // can reach into a known PENDING doc without creating yet another vendor.
+  let pendingDocIdForRejectTest = '';
+
+  it('should reject CR upload without `number` in details', async () => {
+    const fileId = await createFileFor(vendorToken);
+    const res = await request(APP_URL)
+      .post('/api/v1/vendor/kyc/documents')
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({
+        type: 'COMMERCIAL_REGISTRATION',
+        fileId,
+        // Missing `number` — `issueDate` alone should not satisfy validation.
+        details: { issueDate: '2024-01-01' },
+      });
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/number/i);
+  }, 30000);
+
+  it('should reject double-PENDING upload of same type', async () => {
+    // Happy-path left CR APPROVED. Supersede with a new CR — that creates a
+    // fresh PENDING row.
+    const fileId1 = await createFileFor(vendorToken);
+    const first = await request(APP_URL)
+      .post('/api/v1/vendor/kyc/documents')
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({
+        type: 'COMMERCIAL_REGISTRATION',
+        fileId: fileId1,
+        details: { number: 'CR-2', issueDate: '2024-02-01' },
+      });
+    expect(first.status).toBe(201);
+    expect(first.body.status).toBe('PENDING');
+    pendingDocIdForRejectTest = first.body.id as string;
+
+    // Now try to upload another CR while the previous one is still PENDING.
+    const fileId2 = await createFileFor(vendorToken);
+    const second = await request(APP_URL)
+      .post('/api/v1/vendor/kyc/documents')
+      .set('Authorization', `Bearer ${vendorToken}`)
+      .send({
+        type: 'COMMERCIAL_REGISTRATION',
+        fileId: fileId2,
+        details: { number: 'CR-3', issueDate: '2024-03-01' },
+      });
+    expect(second.status).toBe(422);
+    expect(second.body.message).toMatch(/pending/i);
+  }, 60000);
+
+  it('should reject admin review with status=REJECTED but no rejectReason', async () => {
+    // Re-uses the PENDING doc created by the previous test.
+    expect(pendingDocIdForRejectTest).not.toBe('');
+    const res = await request(APP_URL)
+      .patch(`/api/v1/admin/kyc/documents/${pendingDocIdForRejectTest}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'REJECTED' });
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/rejectReason/i);
+  }, 30000);
+
+  it('should reject vendor calling admin endpoints', async () => {
+    const res = await request(APP_URL)
+      .get('/api/v1/admin/kyc/queue')
+      .set('Authorization', `Bearer ${vendorToken}`);
+    expect(res.status).toBe(403);
+  }, 30000);
 });
