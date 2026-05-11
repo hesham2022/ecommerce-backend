@@ -92,6 +92,23 @@ export class VendorsService {
     return this.repo.findByUserId(userId);
   }
 
+  /**
+   * Returns the calling user's vendor regardless of status (PENDING, ACTIVE,
+   * SUSPENDED). Used by flows that must work pre-activation — notably KYC,
+   * which a PENDING vendor must be able to submit before becoming ACTIVE.
+   * Throws ForbiddenException when the user has no vendor account.
+   *
+   * Contrast with `ProductsService.getCallingActiveVendor`, which additionally
+   * requires status === ACTIVE.
+   */
+  async getCallingVendor(userId: number): Promise<Vendor> {
+    const v = await this.repo.findByUserId(userId);
+    if (!v) {
+      throw new ForbiddenException('You do not have a vendor account');
+    }
+    return v;
+  }
+
   async findBySlug(slug: string): Promise<Vendor | null> {
     return this.repo.findBySlug(slug);
   }
