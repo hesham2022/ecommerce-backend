@@ -12,6 +12,7 @@ export class VendorMapper {
     d.logoFileId = entity.logoFileId;
     d.bannerFileId = entity.bannerFileId;
     d.status = entity.status;
+    d.kycStatus = entity.kycStatus;
     d.defaultRegionId = entity.defaultRegionId;
     d.supportedRegionIds = entity.supportedRegionIds ?? [];
     d.returnWindowDays = entity.returnWindowDays;

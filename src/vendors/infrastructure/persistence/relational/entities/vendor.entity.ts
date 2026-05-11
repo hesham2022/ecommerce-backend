@@ -13,6 +13,7 @@ import {
 import { EntityRelationalHelper } from '../../../../../utils/relational-entity-helper';
 import { UserEntity } from '../../../../../users/infrastructure/persistence/relational/entities/user.entity';
 import { FileEntity } from '../../../../../files/infrastructure/persistence/relational/entities/file.entity';
+import { KycStatus } from '../../../../../kyc/domain/kyc-enums';
 import { VendorStatus } from '../../../../domain/vendor';
 
 @Entity({ name: 'vendor' })
@@ -59,6 +60,15 @@ export class VendorEntity extends EntityRelationalHelper {
 
   @Column({ type: 'enum', enum: VendorStatus, default: VendorStatus.PENDING })
   status!: VendorStatus;
+
+  @Column({
+    name: 'kyc_status',
+    type: 'enum',
+    enum: KycStatus,
+    enumName: 'kyc_status_enum',
+    default: KycStatus.NOT_SUBMITTED,
+  })
+  kycStatus!: KycStatus;
 
   @Column({ name: 'default_region_id', type: 'uuid' })
   defaultRegionId!: string;

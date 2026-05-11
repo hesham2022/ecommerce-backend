@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { uuidv7Generate } from '../utils/uuid';
 import { Vendor, VendorStatus } from './domain/vendor';
@@ -12,6 +13,7 @@ import { RegionsService } from '../regions/regions.service';
 import { UsersService } from '../users/users.service';
 import { RoleEnum } from '../roles/roles.enum';
 import { StatusEnum } from '../statuses/statuses.enum';
+import { KycStatus } from '../kyc/domain/kyc-enums';
 
 const SLUG_MAX_LEN = 64;
 const SLUG_RETRY_LIMIT = 5;
@@ -62,6 +64,7 @@ export class VendorsService {
       logoFileId: null,
       bannerFileId: null,
       status,
+      kycStatus: KycStatus.NOT_SUBMITTED,
       defaultRegionId: defaultRegion.id,
       supportedRegionIds: [defaultRegion.id],
       returnWindowDays: 14,
@@ -87,6 +90,23 @@ export class VendorsService {
 
   async getByUserId(userId: number): Promise<Vendor | null> {
     return this.repo.findByUserId(userId);
+  }
+
+  /**
+   * Returns the calling user's vendor regardless of status (PENDING, ACTIVE,
+   * SUSPENDED). Used by flows that must work pre-activation — notably KYC,
+   * which a PENDING vendor must be able to submit before becoming ACTIVE.
+   * Throws ForbiddenException when the user has no vendor account.
+   *
+   * Contrast with `ProductsService.getCallingActiveVendor`, which additionally
+   * requires status === ACTIVE.
+   */
+  async getCallingVendor(userId: number): Promise<Vendor> {
+    const v = await this.repo.findByUserId(userId);
+    if (!v) {
+      throw new ForbiddenException('You do not have a vendor account');
+    }
+    return v;
   }
 
   async findBySlug(slug: string): Promise<Vendor | null> {
@@ -120,6 +140,11 @@ export class VendorsService {
     const v = await this.getById(id);
     if (v.status !== VendorStatus.PENDING) {
       throw new ForbiddenException('Only PENDING vendors can be approved');
+    }
+    if (v.kycStatus !== KycStatus.APPROVED) {
+      throw new UnprocessableEntityException(
+        'Vendor cannot be activated until KYC is approved',
+      );
     }
     const updated = await this.repo.setStatus(id, VendorStatus.ACTIVE);
     await this.grantVendorRole(v.userId);
