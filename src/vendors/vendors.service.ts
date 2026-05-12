@@ -65,7 +65,6 @@ export class VendorsService {
       bannerFileId: null,
       status,
       kycStatus: KycStatus.NOT_SUBMITTED,
-      commissionRate: '0.1000',
       defaultRegionId: defaultRegion.id,
       supportedRegionIds: [defaultRegion.id],
       returnWindowDays: 14,

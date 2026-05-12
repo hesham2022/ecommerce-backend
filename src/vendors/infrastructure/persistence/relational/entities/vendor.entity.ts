@@ -92,6 +92,15 @@ export class VendorEntity extends EntityRelationalHelper {
   })
   shipsFromCountry!: string | null;
 
+  @Column({
+    name: 'commission_rate',
+    type: 'decimal',
+    precision: 5,
+    scale: 4,
+    default: '0.1000',
+  })
+  commissionRate!: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

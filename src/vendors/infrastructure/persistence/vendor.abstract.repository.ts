@@ -17,7 +17,8 @@ export abstract class VendorAbstractRepository {
   abstract findBySlug(slug: string): Promise<Vendor | null>;
   abstract findByUserId(userId: number): Promise<Vendor | null>;
   abstract create(
-    input: Omit<Vendor, 'createdAt' | 'updatedAt'>,
+    input: Omit<Vendor, 'createdAt' | 'updatedAt' | 'commissionRate'> &
+      Partial<Pick<Vendor, 'commissionRate'>>,
   ): Promise<Vendor>;
   abstract update(id: string, patch: Partial<Vendor>): Promise<Vendor>;
   abstract setStatus(id: string, status: VendorStatus): Promise<Vendor>;
