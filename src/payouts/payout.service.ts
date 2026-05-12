@@ -25,7 +25,17 @@ export interface OnSubOrderDeliveredInput {
 
 // Loose service contracts — concrete classes get wired in Task 18 via the payouts module.
 interface VendorReader {
-  findById(id: string): Promise<{ id: string; commissionRate: string } | null>;
+  findById(id: string): Promise<{
+    id: string;
+    status?: string;
+    kycStatus?: string;
+    commissionRate: string;
+  } | null>;
+  listEligibleForPayout(
+    asOf: Date,
+  ): Promise<
+    Array<{ vendorId: string; availableMinor: string; currencyCode: string }>
+  >;
 }
 interface SettingsReader {
   getValue<K extends string>(key: K): Promise<any>;
@@ -87,6 +97,60 @@ export class PayoutService {
       subOrderId: input.subOrderId,
       memo: `Earning from sub-order ${input.subOrderId}`,
     });
+  }
+
+  async issuePayoutsForCycle(cycleKey: string): Promise<{ batchId: string }> {
+    const batch = await this.batches.createIfAbsent(cycleKey);
+    if (!batch) {
+      const existing = await this.batches.findByCycle(cycleKey);
+      return { batchId: existing!.id };
+    }
+
+    const minimum = BigInt(
+      await this.settings.getValue('payout_minimum_amount_minor'),
+    );
+    const now = new Date();
+    const candidates = await this.vendors.listEligibleForPayout(now);
+
+    let vendorCount = 0;
+    let total = 0n;
+
+    for (const c of candidates) {
+      const available = BigInt(c.availableMinor);
+      if (available < minimum) continue;
+
+      const v = await this.vendors.findById(c.vendorId);
+      if (!v || v.status !== 'ACTIVE' || v.kycStatus !== 'APPROVED') continue;
+
+      const iban = await this.kyc.findLatestApprovedIban(c.vendorId);
+      if (!iban) continue;
+
+      const payout = await this.payouts.create({
+        vendorId: c.vendorId,
+        cycleKey,
+        amountMinor: available.toString(),
+        currencyCode: c.currencyCode,
+        ibanSnapshot: iban.iban,
+        bankNameSnapshot: iban.bankName,
+        accountHolderSnapshot: iban.accountHolderName ?? null,
+      });
+
+      await this.ledger.create({
+        vendorId: c.vendorId,
+        type: LedgerEntryType.PAYOUT_ISSUED,
+        amountMinor: `-${available.toString()}`,
+        currencyCode: c.currencyCode,
+        availableAt: now,
+        payoutId: payout.id,
+        memo: `Payout issued for cycle ${cycleKey}`,
+      });
+
+      vendorCount++;
+      total += available;
+    }
+
+    await this.batches.markReady(batch.id, vendorCount, total.toString());
+    return { batchId: batch.id };
   }
 
   async onReturnRefunded(input: OnReturnRefundedInput): Promise<void> {
