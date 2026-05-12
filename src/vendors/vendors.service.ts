@@ -14,6 +14,7 @@ import { UsersService } from '../users/users.service';
 import { RoleEnum } from '../roles/roles.enum';
 import { StatusEnum } from '../statuses/statuses.enum';
 import { KycStatus } from '../kyc/domain/kyc-enums';
+import { AdminAuditLogService } from '../admin-audit-log/admin-audit-log.service';
 
 const SLUG_MAX_LEN = 64;
 const SLUG_RETRY_LIMIT = 5;
@@ -34,6 +35,7 @@ export class VendorsService {
     private readonly settings: SettingsService,
     private readonly regions: RegionsService,
     private readonly users: UsersService,
+    private readonly audit: AdminAuditLogService,
   ) {}
 
   async signup(input: SignupInput): Promise<Vendor> {
@@ -179,6 +181,21 @@ export class VendorsService {
       throw new ForbiddenException('Only SUSPENDED vendors can be reinstated');
     }
     return this.repo.setStatus(id, VendorStatus.ACTIVE);
+  }
+
+  async updateCommissionRate(
+    vendorId: string,
+    commissionRate: string,
+    adminUserId: number,
+  ): Promise<void> {
+    await this.repo.update(vendorId, { commissionRate });
+    await this.audit.record({
+      adminUserId,
+      action: 'VENDOR_COMMISSION_UPDATED',
+      targetType: 'vendor',
+      targetId: vendorId,
+      payload: { commissionRate },
+    });
   }
 
   private async grantVendorRole(userId: number): Promise<void> {

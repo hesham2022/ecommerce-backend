@@ -14,6 +14,7 @@ import { DEFAULT_SETTINGS } from '../settings/domain/setting';
 import { Region } from '../regions/domain/region';
 import { RoleEnum } from '../roles/roles.enum';
 import { KycStatus } from '../kyc/domain/kyc-enums';
+import { AdminAuditLogService } from '../admin-audit-log/admin-audit-log.service';
 
 describe('VendorsService', () => {
   let service: VendorsService;
@@ -21,6 +22,7 @@ describe('VendorsService', () => {
   let settings: jest.Mocked<SettingsService>;
   let regions: jest.Mocked<RegionsService>;
   let users: jest.Mocked<UsersService>;
+  let audit: jest.Mocked<AdminAuditLogService>;
 
   const region: Region = Object.assign(new Region(), {
     id: 'region-sa',
@@ -86,6 +88,10 @@ describe('VendorsService', () => {
             update: jest.fn(),
           },
         },
+        {
+          provide: AdminAuditLogService,
+          useValue: { record: jest.fn() },
+        },
       ],
     }).compile();
     service = moduleRef.get(VendorsService);
@@ -93,6 +99,7 @@ describe('VendorsService', () => {
     settings = moduleRef.get(SettingsService);
     regions = moduleRef.get(RegionsService);
     users = moduleRef.get(UsersService);
+    audit = moduleRef.get(AdminAuditLogService);
   });
 
   describe('signup', () => {
@@ -261,6 +268,27 @@ describe('VendorsService', () => {
     it('should return null when user has no vendor account', async () => {
       repo.findByUserId.mockResolvedValue(null);
       expect(await service.getByUserId(99)).toBeNull();
+    });
+  });
+
+  describe('updateCommissionRate', () => {
+    it('should update vendor commission rate and write audit log', async () => {
+      repo.update.mockResolvedValue(buildVendor({ commissionRate: '0.1500' }));
+      audit.record.mockResolvedValue(undefined);
+
+      await service.updateCommissionRate('v1', '0.1500', 1);
+
+      expect(repo.update).toHaveBeenCalledWith('v1', {
+        commissionRate: '0.1500',
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          adminUserId: 1,
+          action: 'VENDOR_COMMISSION_UPDATED',
+          targetType: 'vendor',
+          targetId: 'v1',
+        }),
+      );
     });
   });
 });
