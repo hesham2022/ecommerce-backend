@@ -7,6 +7,7 @@ import { RelationalVendorPersistenceModule } from './infrastructure/persistence/
 import { UsersModule } from '../users/users.module';
 import { RegionsModule } from '../regions/regions.module';
 import { SettingsModule } from '../settings/settings.module';
+import { AdminAuditLogModule } from '../admin-audit-log/admin-audit-log.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { SettingsModule } from '../settings/settings.module';
     UsersModule,
     RegionsModule,
     SettingsModule,
+    AdminAuditLogModule,
   ],
   controllers: [
     VendorPublicController,

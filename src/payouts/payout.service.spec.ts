@@ -248,7 +248,6 @@ describe('PayoutService state transitions', () => {
       'p1',
       expect.objectContaining({
         status: VendorPayoutStatus.ISSUED,
-        adminUserId: 1,
       }),
     );
     expect(audit.record).toHaveBeenCalledWith(

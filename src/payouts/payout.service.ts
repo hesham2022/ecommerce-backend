@@ -178,7 +178,9 @@ export class PayoutService {
     }
 
     const now = new Date();
-    const patch: Record<string, unknown> = { status: dto.status, adminUserId };
+    // adminUserId is tracked in AdminAuditLog; the uuid column on vendor_payout
+    // is informational only — omit it to avoid a type mismatch (int vs uuid).
+    const patch: Record<string, unknown> = { status: dto.status };
     if (dto.status === VendorPayoutStatus.ISSUED) patch.issuedAt = now;
     if (dto.status === VendorPayoutStatus.PAID) patch.paidAt = now;
     if (dto.status === VendorPayoutStatus.FAILED) {
@@ -230,7 +232,8 @@ export class PayoutService {
       amountMinor: input.amountMinor,
       currencyCode: 'SAR',
       availableAt: new Date(),
-      adminUserId: String(input.adminUserId),
+      // adminUserId on ledger is uuid; admin identity is tracked in AdminAuditLog.
+      adminUserId: null,
       memo: input.memo,
     });
 
