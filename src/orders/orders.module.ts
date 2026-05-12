@@ -15,6 +15,7 @@ import { OrdersService } from './orders.service';
 import { VendorOrdersController } from './vendor-orders.controller';
 import { VendorSubOrdersController } from './vendor-suborders.controller';
 import { RelationalOrderPersistenceModule } from './infrastructure/persistence/relational/relational-persistence.module';
+import { PayoutsModule } from '../payouts/payouts.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { RelationalOrderPersistenceModule } from './infrastructure/persistence/r
     ProductsModule,
     RegionsModule,
     forwardRef(() => PaymentsModule),
+    forwardRef(() => PayoutsModule),
   ],
   controllers: [
     CheckoutController,
