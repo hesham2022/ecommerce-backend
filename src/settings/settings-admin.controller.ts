@@ -20,7 +20,7 @@ import { SettingsShape } from './domain/setting';
 import { UpdateSettingDto } from './dto/update-setting.dto';
 
 type SettingKey = keyof SettingsShape;
-type SettingType = 'boolean' | 'string';
+type SettingType = 'boolean' | 'string' | 'number';
 
 // Whitelist of admin-mutable keys, with their expected runtime type.
 // `default_region_id` from the spec is aliased to `default_region_code` in this
@@ -31,6 +31,10 @@ const ALLOWED: Record<SettingKey, SettingType> = {
   products_auto_approve: 'boolean',
   default_region_code: 'string',
   default_locale_code: 'string',
+  payout_hold_days: 'number',
+  payout_minimum_amount_minor: 'string',
+  payout_cycle_cron: 'string',
+  payout_default_commission_rate: 'string',
 };
 
 const SETTING_KEY_ALIASES: Record<string, SettingKey> = {
@@ -130,6 +134,8 @@ export class SettingsAdminController {
     if (expected === 'boolean') return typeof value === 'boolean';
     if (expected === 'string')
       return typeof value === 'string' && value.length > 0;
+    if (expected === 'number')
+      return typeof value === 'number' && Number.isFinite(value);
     return false;
   }
 }
