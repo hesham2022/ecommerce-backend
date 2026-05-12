@@ -126,15 +126,13 @@ export class CreatePayouts1778000000000 implements MigrationInterface {
       FOREIGN KEY ("payout_id") REFERENCES "vendor_payout"("id") ON DELETE RESTRICT;
     `);
 
-    // 7. Seed settings keys into the singleton row
+    // 7. Seed settings keys into the singleton row (idempotent upsert)
     await queryRunner.query(`
-      UPDATE "setting"
-      SET "values" = "values"
-        || '{"payout_hold_days": 14,
-              "payout_minimum_amount_minor": "5000",
-              "payout_cycle_cron": "0 9 * * 1",
-              "payout_default_commission_rate": "0.1000"}'::jsonb
-      WHERE "id" = 1;
+      INSERT INTO "setting" ("id", "values", "updated_at")
+      VALUES (1, '{"payout_hold_days": 14, "payout_minimum_amount_minor": "5000", "payout_cycle_cron": "0 9 * * 1", "payout_default_commission_rate": "0.1000"}'::jsonb, now())
+      ON CONFLICT ("id") DO UPDATE
+        SET "values" = "setting"."values" || EXCLUDED."values",
+            "updated_at" = now();
     `);
   }
 
@@ -150,24 +148,28 @@ export class CreatePayouts1778000000000 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE "vendor_ledger_entry" DROP CONSTRAINT "FK_vendor_ledger_entry_payout";`,
     );
-    await queryRunner.query(`DROP INDEX "UQ_payout_batch_cycle";`);
+    await queryRunner.query(`DROP INDEX "public"."UQ_payout_batch_cycle";`);
     await queryRunner.query(`DROP TABLE "payout_batch";`);
-    await queryRunner.query(`DROP INDEX "IDX_vendor_payout_cycle";`);
-    await queryRunner.query(`DROP INDEX "IDX_vendor_payout_status";`);
-    await queryRunner.query(`DROP INDEX "UQ_vendor_payout_vendor_cycle";`);
+    await queryRunner.query(`DROP INDEX "public"."IDX_vendor_payout_cycle";`);
+    await queryRunner.query(`DROP INDEX "public"."IDX_vendor_payout_status";`);
+    await queryRunner.query(
+      `DROP INDEX "public"."UQ_vendor_payout_vendor_cycle";`,
+    );
     await queryRunner.query(
       `ALTER TABLE "vendor_payout" DROP CONSTRAINT "FK_vendor_payout_vendor";`,
     );
     await queryRunner.query(`DROP TABLE "vendor_payout";`);
-    await queryRunner.query(`DROP INDEX "IDX_vendor_ledger_entry_payout";`);
     await queryRunner.query(
-      `DROP INDEX "UQ_vendor_ledger_entry_clawback_return";`,
+      `DROP INDEX "public"."IDX_vendor_ledger_entry_payout";`,
     );
     await queryRunner.query(
-      `DROP INDEX "UQ_vendor_ledger_entry_earning_sub_order";`,
+      `DROP INDEX "public"."UQ_vendor_ledger_entry_clawback_return";`,
     );
     await queryRunner.query(
-      `DROP INDEX "IDX_vendor_ledger_entry_vendor_available_at";`,
+      `DROP INDEX "public"."UQ_vendor_ledger_entry_earning_sub_order";`,
+    );
+    await queryRunner.query(
+      `DROP INDEX "public"."IDX_vendor_ledger_entry_vendor_available_at";`,
     );
     await queryRunner.query(
       `ALTER TABLE "vendor_ledger_entry" DROP CONSTRAINT "FK_vendor_ledger_entry_vendor";`,
