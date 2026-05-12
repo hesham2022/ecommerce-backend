@@ -9,6 +9,19 @@ import { PayoutBatchRepository } from './infrastructure/persistence/payout-batch
 import { LedgerEntryType, VendorPayoutStatus } from './domain/payout-enums';
 import { computeEarning, computeClawback } from './payout-math';
 import { ReviewPayoutDto } from './dto/review-payout.dto';
+import { computeBalance } from './ledger-balance';
+import { formatISOWeek } from './cycle-key';
+
+function computeNextMondayAt9(from: Date): Date {
+  const d = new Date(from);
+  d.setUTCHours(9, 0, 0, 0);
+  const dayOfWeek = d.getUTCDay();
+  let daysUntilMonday = (1 + 7 - dayOfWeek) % 7;
+  if (daysUntilMonday === 0 && d.getTime() <= from.getTime())
+    daysUntilMonday = 7;
+  d.setUTCDate(d.getUTCDate() + daysUntilMonday);
+  return d;
+}
 
 export interface OnReturnRefundedInput {
   returnId: string;
@@ -284,5 +297,72 @@ export class PayoutService {
       subOrderId: input.subOrderId,
       memo: `Refund clawback for return ${input.returnId}`,
     });
+  }
+
+  async getBalanceForVendor(vendorId: string): Promise<{
+    currencyCode: string;
+    heldBalanceMinor: string;
+    availableBalanceMinor: string;
+    lifetimePaidMinor: string;
+    negativeBalanceWarning: boolean;
+    nextCycleAt: string;
+    minimumPayoutMinor: string;
+  }> {
+    const entries = await this.ledger.findByVendor(vendorId);
+    const balance = computeBalance(
+      entries.map((e) => ({
+        type: e.type,
+        amountMinor: e.amountMinor,
+        availableAt: e.availableAt,
+      })),
+      new Date(),
+    );
+    const minimum = await this.settings.getValue('payout_minimum_amount_minor');
+    return {
+      currencyCode: entries[0]?.currencyCode ?? 'SAR',
+      heldBalanceMinor: balance.heldMinor,
+      availableBalanceMinor: balance.availableMinor,
+      lifetimePaidMinor: balance.lifetimePaidMinor,
+      negativeBalanceWarning: BigInt(balance.availableMinor) < 0n,
+      nextCycleAt: computeNextMondayAt9(new Date()).toISOString(),
+      minimumPayoutMinor: minimum,
+    };
+  }
+
+  async getUpcomingForVendor(vendorId: string): Promise<{
+    cycleKey: string;
+    scheduledFor: string;
+    projectedAmountMinor: string;
+    wouldBePaid: boolean;
+    reason: string | null;
+  }> {
+    const vendor = await this.vendors.findById(vendorId);
+    const entries = await this.ledger.findByVendor(vendorId);
+    const balance = computeBalance(
+      entries.map((e) => ({
+        type: e.type,
+        amountMinor: e.amountMinor,
+        availableAt: e.availableAt,
+      })),
+      new Date(),
+    );
+    const minimum = BigInt(
+      await this.settings.getValue('payout_minimum_amount_minor'),
+    );
+    const next = computeNextMondayAt9(new Date());
+    const projected = balance.availableMinor;
+
+    let reason: string | null = null;
+    if (vendor?.status !== 'ACTIVE') reason = 'VENDOR_SUSPENDED';
+    else if (vendor.kycStatus !== 'APPROVED') reason = 'KYC_NOT_APPROVED';
+    else if (BigInt(projected) < minimum) reason = 'BELOW_MINIMUM';
+
+    return {
+      cycleKey: formatISOWeek(next),
+      scheduledFor: next.toISOString(),
+      projectedAmountMinor: projected,
+      wouldBePaid: reason === null,
+      reason,
+    };
   }
 }

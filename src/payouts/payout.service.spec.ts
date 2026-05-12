@@ -531,3 +531,136 @@ describe('PayoutService.issuePayoutsForCycle', () => {
     );
   });
 });
+
+describe('PayoutService balance + upcoming', () => {
+  let service: PayoutService;
+  let ledger: any;
+  let payouts: any;
+  let batches: any;
+  let vendors: any;
+  let settings: any;
+  let audit: any;
+  let kyc: any;
+
+  beforeEach(() => {
+    ledger = { findByVendor: jest.fn() };
+    payouts = {};
+    batches = {};
+    vendors = { findById: jest.fn() };
+    settings = { getValue: jest.fn() };
+    audit = {};
+    kyc = {};
+    service = new PayoutService(
+      ledger,
+      payouts,
+      batches,
+      vendors,
+      settings,
+      audit,
+      kyc,
+    );
+  });
+
+  it('should return held/available/lifetimePaid from ledger via getBalanceForVendor', async () => {
+    ledger.findByVendor.mockResolvedValue([
+      {
+        type: LedgerEntryType.EARNING,
+        amountMinor: '10000',
+        availableAt: new Date('2030-01-01'),
+        currencyCode: 'SAR',
+      },
+      {
+        type: LedgerEntryType.EARNING,
+        amountMinor: '7000',
+        availableAt: new Date('2020-01-01'),
+        currencyCode: 'SAR',
+      },
+      {
+        type: LedgerEntryType.PAYOUT_ISSUED,
+        amountMinor: '-5000',
+        availableAt: new Date('2020-01-02'),
+        currencyCode: 'SAR',
+      },
+    ]);
+    settings.getValue.mockImplementation((k: string) => {
+      if (k === 'payout_minimum_amount_minor') return Promise.resolve('5000');
+      return Promise.resolve(null);
+    });
+
+    const result = await service.getBalanceForVendor('v1');
+    expect(result).toMatchObject({
+      heldBalanceMinor: '10000',
+      availableBalanceMinor: '2000',
+      lifetimePaidMinor: '5000',
+      currencyCode: 'SAR',
+      negativeBalanceWarning: false,
+      minimumPayoutMinor: '5000',
+    });
+    expect(result.nextCycleAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('should report BELOW_MINIMUM when projected < min via getUpcomingForVendor', async () => {
+    vendors.findById.mockResolvedValue({
+      id: 'v1',
+      status: 'ACTIVE',
+      kycStatus: 'APPROVED',
+    });
+    ledger.findByVendor.mockResolvedValue([
+      {
+        type: LedgerEntryType.EARNING,
+        amountMinor: '3000',
+        availableAt: new Date('2020-01-01'),
+        currencyCode: 'SAR',
+      },
+    ]);
+    settings.getValue.mockImplementation((k: string) =>
+      Promise.resolve(k === 'payout_minimum_amount_minor' ? '5000' : null),
+    );
+
+    const result = await service.getUpcomingForVendor('v1');
+    expect(result.wouldBePaid).toBe(false);
+    expect(result.reason).toBe('BELOW_MINIMUM');
+  });
+
+  it('should report VENDOR_SUSPENDED when status != ACTIVE via getUpcomingForVendor', async () => {
+    vendors.findById.mockResolvedValue({
+      id: 'v1',
+      status: 'SUSPENDED',
+      kycStatus: 'APPROVED',
+    });
+    ledger.findByVendor.mockResolvedValue([
+      {
+        type: LedgerEntryType.EARNING,
+        amountMinor: '50000',
+        availableAt: new Date('2020-01-01'),
+        currencyCode: 'SAR',
+      },
+    ]);
+    settings.getValue.mockResolvedValue('5000');
+
+    const result = await service.getUpcomingForVendor('v1');
+    expect(result.wouldBePaid).toBe(false);
+    expect(result.reason).toBe('VENDOR_SUSPENDED');
+  });
+
+  it('should report KYC_NOT_APPROVED when kycStatus != APPROVED via getUpcomingForVendor', async () => {
+    vendors.findById.mockResolvedValue({
+      id: 'v1',
+      status: 'ACTIVE',
+      kycStatus: 'PENDING_REVIEW',
+    });
+    ledger.findByVendor.mockResolvedValue([
+      {
+        type: LedgerEntryType.EARNING,
+        amountMinor: '50000',
+        availableAt: new Date('2020-01-01'),
+        currencyCode: 'SAR',
+      },
+    ]);
+    settings.getValue.mockResolvedValue('5000');
+
+    const result = await service.getUpcomingForVendor('v1');
+    expect(result.wouldBePaid).toBe(false);
+    expect(result.reason).toBe('KYC_NOT_APPROVED');
+  });
+});
