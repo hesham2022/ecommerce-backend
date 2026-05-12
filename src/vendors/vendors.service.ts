@@ -52,6 +52,9 @@ export class VendorsService {
 
     const slug = await this.uniqueSlug(input.name);
     const status = autoApprove ? VendorStatus.ACTIVE : VendorStatus.PENDING;
+    const commissionRate = await this.settings.getValue(
+      'payout_default_commission_rate',
+    );
 
     const vendor = await this.repo.create({
       id: uuidv7Generate(),
@@ -69,6 +72,7 @@ export class VendorsService {
       supportedRegionIds: [defaultRegion.id],
       returnWindowDays: 14,
       shipsFromCountry: null,
+      commissionRate,
     });
 
     if (status === VendorStatus.ACTIVE) {

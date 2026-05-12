@@ -157,6 +157,34 @@ describe('VendorsService', () => {
       );
       expect(result.status).toBe(VendorStatus.ACTIVE);
     });
+
+    it('should set commissionRate from settings.payout_default_commission_rate on signup', async () => {
+      settings.get.mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        vendors_auto_approve: false,
+      });
+      settings.getValue.mockResolvedValue('0.1500');
+      regions.getDefault.mockResolvedValue(region);
+      users.create.mockResolvedValue({ id: 12 } as never);
+      repo.findBySlug.mockResolvedValue(null);
+      repo.create.mockImplementation((input) =>
+        Promise.resolve(buildVendor(input as Partial<Vendor>)),
+      );
+
+      await service.signup({
+        email: 'commission-test@example.com',
+        password: 'StrongPwd1!',
+        firstName: 'C',
+        lastName: 'Test',
+        name: 'Commission Shop',
+      });
+
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          commissionRate: '0.1500',
+        }),
+      );
+    });
   });
 
   describe('approve / reject / suspend / reinstate', () => {
