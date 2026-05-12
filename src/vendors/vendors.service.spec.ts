@@ -4,6 +4,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { getDataSourceToken } from '@nestjs/typeorm';
 import { VendorsService } from './vendors.service';
 import { VendorAbstractRepository } from './infrastructure/persistence/vendor.abstract.repository';
 import { Vendor, VendorStatus } from './domain/vendor';
@@ -91,6 +92,10 @@ describe('VendorsService', () => {
         {
           provide: AdminAuditLogService,
           useValue: { record: jest.fn() },
+        },
+        {
+          provide: getDataSourceToken(),
+          useValue: { query: jest.fn() },
         },
       ],
     }).compile();

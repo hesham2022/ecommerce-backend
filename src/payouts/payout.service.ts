@@ -11,6 +11,10 @@ import { computeEarning, computeClawback } from './payout-math';
 import { ReviewPayoutDto } from './dto/review-payout.dto';
 import { computeBalance } from './ledger-balance';
 import { formatISOWeek } from './cycle-key';
+import { VendorsService } from '../vendors/vendors.service';
+import { SettingsService } from '../settings/settings.service';
+import { AdminAuditLogService } from '../admin-audit-log/admin-audit-log.service';
+import { KycService } from '../kyc/kyc.service';
 
 function computeNextMondayAt9(from: Date): Date {
   const d = new Date(from);
@@ -63,50 +67,16 @@ const ACTION_BY_STATUS: Record<VendorPayoutStatus, string> = {
   [VendorPayoutStatus.CANCELED]: 'PAYOUT_CANCELED',
 };
 
-// Loose service contracts — concrete classes get wired in Task 18 via the payouts module.
-interface VendorReader {
-  findById(id: string): Promise<{
-    id: string;
-    status?: string;
-    kycStatus?: string;
-    commissionRate: string;
-  } | null>;
-  listEligibleForPayout(
-    asOf: Date,
-  ): Promise<
-    Array<{ vendorId: string; availableMinor: string; currencyCode: string }>
-  >;
-}
-interface SettingsReader {
-  getValue<K extends string>(key: K): Promise<any>;
-}
-interface AuditWriter {
-  record(input: {
-    adminUserId: string | null;
-    action: string;
-    targetType: string;
-    targetId: string;
-    payload?: Record<string, unknown>;
-  }): Promise<void>;
-}
-interface KycReader {
-  findLatestApprovedIban(vendorId: string): Promise<{
-    iban: string;
-    bankName: string;
-    accountHolderName?: string;
-  } | null>;
-}
-
 @Injectable()
 export class PayoutService {
   constructor(
     private readonly ledger: VendorLedgerRepository,
     private readonly payouts: VendorPayoutRepository,
     private readonly batches: PayoutBatchRepository,
-    private readonly vendors: VendorReader,
-    private readonly settings: SettingsReader,
-    private readonly audit: AuditWriter,
-    private readonly kyc: KycReader,
+    private readonly vendors: VendorsService,
+    private readonly settings: SettingsService,
+    private readonly audit: AdminAuditLogService,
+    private readonly kyc: KycService,
   ) {}
 
   async onSubOrderDelivered(input: OnSubOrderDeliveredInput): Promise<void> {
@@ -196,7 +166,7 @@ export class PayoutService {
   async reviewPayout(
     id: string,
     dto: ReviewPayoutDto,
-    adminUserId: string,
+    adminUserId: number,
   ): Promise<void> {
     const current = await this.payouts.findById(id);
     if (!current) throw new NotFoundException(`payout ${id} not found`);
@@ -249,7 +219,7 @@ export class PayoutService {
     vendorId: string;
     amountMinor: string;
     memo: string;
-    adminUserId: string;
+    adminUserId: number;
   }): Promise<void> {
     if (input.amountMinor === '0')
       throw new BadRequestException('amountMinor must be nonzero');
@@ -260,7 +230,7 @@ export class PayoutService {
       amountMinor: input.amountMinor,
       currencyCode: 'SAR',
       availableAt: new Date(),
-      adminUserId: input.adminUserId,
+      adminUserId: String(input.adminUserId),
       memo: input.memo,
     });
 

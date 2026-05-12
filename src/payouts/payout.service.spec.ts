@@ -243,21 +243,17 @@ describe('PayoutService state transitions', () => {
     payouts.findById.mockResolvedValue(
       basePayout({ status: VendorPayoutStatus.PENDING }) as any,
     );
-    await service.reviewPayout(
-      'p1',
-      { status: VendorPayoutStatus.ISSUED },
-      'admin1',
-    );
+    await service.reviewPayout('p1', { status: VendorPayoutStatus.ISSUED }, 1);
     expect(payouts.update).toHaveBeenCalledWith(
       'p1',
       expect.objectContaining({
         status: VendorPayoutStatus.ISSUED,
-        adminUserId: 'admin1',
+        adminUserId: 1,
       }),
     );
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
-        adminUserId: 'admin1',
+        adminUserId: 1,
         action: 'PAYOUT_MARKED_ISSUED',
         targetType: 'vendor_payout',
         targetId: 'p1',
@@ -269,11 +265,7 @@ describe('PayoutService state transitions', () => {
     payouts.findById.mockResolvedValue(
       basePayout({ status: VendorPayoutStatus.ISSUED }) as any,
     );
-    await service.reviewPayout(
-      'p1',
-      { status: VendorPayoutStatus.PAID },
-      'admin1',
-    );
+    await service.reviewPayout('p1', { status: VendorPayoutStatus.PAID }, 1);
     expect(payouts.update).toHaveBeenCalledWith(
       'p1',
       expect.objectContaining({ status: VendorPayoutStatus.PAID }),
@@ -293,7 +285,7 @@ describe('PayoutService state transitions', () => {
     await service.reviewPayout(
       'p1',
       { status: VendorPayoutStatus.FAILED, failureReason: 'IBAN invalid' },
-      'admin1',
+      1,
     );
     expect(ledger.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -318,7 +310,7 @@ describe('PayoutService state transitions', () => {
     await service.reviewPayout(
       'p1',
       { status: VendorPayoutStatus.CANCELED, failureReason: 'wrong amount' },
-      'admin1',
+      1,
     );
     expect(ledger.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -337,11 +329,7 @@ describe('PayoutService state transitions', () => {
       basePayout({ status: VendorPayoutStatus.PAID }) as any,
     );
     await expect(
-      service.reviewPayout(
-        'p1',
-        { status: VendorPayoutStatus.PENDING },
-        'admin1',
-      ),
+      service.reviewPayout('p1', { status: VendorPayoutStatus.PENDING }, 1),
     ).rejects.toThrow(/invalid transition/i);
   });
 
@@ -350,7 +338,7 @@ describe('PayoutService state transitions', () => {
       vendorId: 'v1',
       amountMinor: '-5000',
       memo: 'Goodwill credit per ticket #1234',
-      adminUserId: 'admin1',
+      adminUserId: 1,
     });
     expect(ledger.create).toHaveBeenCalledWith(
       expect.objectContaining({

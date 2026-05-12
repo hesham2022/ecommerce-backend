@@ -212,6 +212,37 @@ describe('KycService', () => {
     });
   });
 
+  describe('findLatestApprovedIban', () => {
+    it('should return the most recent APPROVED IBAN document details, or null if none', async () => {
+      repo.listForVendor.mockResolvedValue([
+        {
+          type: KycDocumentType.IBAN_DOCUMENT,
+          status: KycDocumentStatus.APPROVED,
+          reviewedAt: new Date('2026-01-01'),
+          details: { iban: 'SA-OLD', bankName: 'BankA' },
+        } as unknown as KycDocument,
+        {
+          type: KycDocumentType.IBAN_DOCUMENT,
+          status: KycDocumentStatus.APPROVED,
+          reviewedAt: new Date('2026-05-01'),
+          details: { iban: 'SA-NEW', bankName: 'BankB' },
+        } as unknown as KycDocument,
+      ]);
+      const result = await service.findLatestApprovedIban('v1');
+      expect(result).toEqual({
+        iban: 'SA-NEW',
+        bankName: 'BankB',
+        accountHolderName: undefined,
+      });
+    });
+
+    it('should return null when no APPROVED IBAN exists', async () => {
+      repo.listForVendor.mockResolvedValue([]);
+      const result = await service.findLatestApprovedIban('v1');
+      expect(result).toBeNull();
+    });
+  });
+
   describe('review', () => {
     const docFixture = (overrides?: Partial<KycDocument>): KycDocument => {
       const d = new KycDocument();
