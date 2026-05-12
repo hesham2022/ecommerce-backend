@@ -410,3 +410,127 @@ export async function setHoldDaysZero(adminToken: string): Promise<void> {
     );
   }
 }
+
+/**
+ * Sets payout_hold_days to the given value.
+ */
+export async function setHoldDays(
+  adminToken: string,
+  days: number,
+): Promise<void> {
+  const res = await request(APP_URL)
+    .patch('/api/v1/admin/settings/payout_hold_days')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ value: days });
+  if (res.status >= 400) {
+    throw new Error(
+      `setHoldDays(${days}) failed: ${res.status} ${JSON.stringify(res.body)}`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Returns / refund helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Drives an already-delivered sub-order through the full returns happy-path
+ * (REQUESTED → APPROVED → SHIPPED_BACK → RECEIVED → REFUNDED) so that
+ * `onReturnRefunded` fires and a REFUND_CLAWBACK ledger entry is written.
+ *
+ * @param orderId      The parent order UUID.
+ * @param subOrderId   The sub-order UUID.
+ * @param orderItemId  The order-item UUID (first item; used for the return request).
+ * @param quantity     Number of units to return (must be ≤ ordered quantity).
+ * @param buyerToken   JWT of the buyer who placed the original order.
+ * @param vendorToken  JWT of the vendor who fulfills the return.
+ */
+export async function refundDeliveredOrder(input: {
+  orderId: string;
+  subOrderId: string;
+  orderItemId: string;
+  quantity: number;
+  buyerToken: string;
+  vendorToken: string;
+}): Promise<{ returnId: string }> {
+  const {
+    orderId,
+    subOrderId,
+    orderItemId,
+    quantity,
+    buyerToken,
+    vendorToken,
+  } = input;
+
+  // 1. Buyer opens RMA
+  const create = await request(APP_URL)
+    .post(`/api/v1/orders/${orderId}/suborders/${subOrderId}/returns`)
+    .set('Authorization', `Bearer ${buyerToken}`)
+    .send({
+      items: [{ orderItemId, quantity }],
+      reason: 'DAMAGED',
+      reasonNote: 'Arrived damaged during e2e test.',
+    });
+  if (create.status !== 201) {
+    throw new Error(
+      `return create failed: ${create.status} ${JSON.stringify(create.body)}`,
+    );
+  }
+  const returnId = create.body.id as string;
+
+  // 2. Vendor approves
+  const approve = await request(APP_URL)
+    .patch(`/api/v1/vendor/returns/${returnId}`)
+    .set('Authorization', `Bearer ${vendorToken}`)
+    .send({ status: 'APPROVED' });
+  if (approve.status !== 200) {
+    throw new Error(
+      `return approve failed: ${approve.status} ${JSON.stringify(approve.body)}`,
+    );
+  }
+
+  // 3. Buyer ships back
+  const ship = await request(APP_URL)
+    .patch(`/api/v1/returns/${returnId}/shipped-back`)
+    .set('Authorization', `Bearer ${buyerToken}`)
+    .send({ trackingNumber: `TRK-BACK-${Date.now()}` });
+  if (ship.status !== 200) {
+    throw new Error(
+      `return shipped-back failed: ${ship.status} ${JSON.stringify(ship.body)}`,
+    );
+  }
+
+  // 4. Vendor marks RECEIVED (with restock)
+  const recv = await request(APP_URL)
+    .patch(`/api/v1/vendor/returns/${returnId}`)
+    .set('Authorization', `Bearer ${vendorToken}`)
+    .send({ status: 'RECEIVED', restock: true });
+  if (recv.status !== 200) {
+    throw new Error(
+      `return received failed: ${recv.status} ${JSON.stringify(recv.body)}`,
+    );
+  }
+
+  // 5. Vendor marks REFUNDED → triggers onReturnRefunded → REFUND_CLAWBACK
+  const refund = await request(APP_URL)
+    .patch(`/api/v1/vendor/returns/${returnId}`)
+    .set('Authorization', `Bearer ${vendorToken}`)
+    .send({ status: 'REFUNDED' });
+  if (refund.status !== 200) {
+    throw new Error(
+      `return refund failed: ${refund.status} ${JSON.stringify(refund.body)}`,
+    );
+  }
+
+  return { returnId };
+}
+
+/**
+ * Extracts the first orderItemId from a placed order response.
+ * Helper so callers don't need to know the exact response shape.
+ */
+export function firstOrderItemId(placeOrderBody: {
+  subOrders: Array<{ items: Array<{ id: string }> }>;
+}): string {
+  return placeOrderBody.subOrders[0].items[0].id;
+}
