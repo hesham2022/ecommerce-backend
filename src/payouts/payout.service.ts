@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { VendorLedgerRepository } from './infrastructure/persistence/vendor-ledger.abstract.repository';
 import { VendorPayoutRepository } from './infrastructure/persistence/vendor-payout.abstract.repository';
 import { PayoutBatchRepository } from './infrastructure/persistence/payout-batch.abstract.repository';
-import { LedgerEntryType } from './domain/payout-enums';
+import { LedgerEntryType, VendorPayoutStatus } from './domain/payout-enums';
 import { computeEarning, computeClawback } from './payout-math';
+import { ReviewPayoutDto } from './dto/review-payout.dto';
 
 export interface OnReturnRefundedInput {
   returnId: string;
@@ -22,6 +27,28 @@ export interface OnSubOrderDeliveredInput {
   currencyCode: string;
   deliveredAt: Date;
 }
+
+const ALLOWED: Record<VendorPayoutStatus, VendorPayoutStatus[]> = {
+  [VendorPayoutStatus.PENDING]: [
+    VendorPayoutStatus.ISSUED,
+    VendorPayoutStatus.CANCELED,
+  ],
+  [VendorPayoutStatus.ISSUED]: [
+    VendorPayoutStatus.PAID,
+    VendorPayoutStatus.FAILED,
+  ],
+  [VendorPayoutStatus.PAID]: [],
+  [VendorPayoutStatus.FAILED]: [],
+  [VendorPayoutStatus.CANCELED]: [],
+};
+
+const ACTION_BY_STATUS: Record<VendorPayoutStatus, string> = {
+  [VendorPayoutStatus.PENDING]: 'PAYOUT_CREATED',
+  [VendorPayoutStatus.ISSUED]: 'PAYOUT_MARKED_ISSUED',
+  [VendorPayoutStatus.PAID]: 'PAYOUT_MARKED_PAID',
+  [VendorPayoutStatus.FAILED]: 'PAYOUT_MARKED_FAILED',
+  [VendorPayoutStatus.CANCELED]: 'PAYOUT_CANCELED',
+};
 
 // Loose service contracts — concrete classes get wired in Task 18 via the payouts module.
 interface VendorReader {
@@ -151,6 +178,86 @@ export class PayoutService {
 
     await this.batches.markReady(batch.id, vendorCount, total.toString());
     return { batchId: batch.id };
+  }
+
+  async reviewPayout(
+    id: string,
+    dto: ReviewPayoutDto,
+    adminUserId: string,
+  ): Promise<void> {
+    const current = await this.payouts.findById(id);
+    if (!current) throw new NotFoundException(`payout ${id} not found`);
+
+    if (!ALLOWED[current.status].includes(dto.status)) {
+      throw new BadRequestException(
+        `invalid transition from ${current.status} to ${dto.status}`,
+      );
+    }
+
+    const now = new Date();
+    const patch: Record<string, unknown> = { status: dto.status, adminUserId };
+    if (dto.status === VendorPayoutStatus.ISSUED) patch.issuedAt = now;
+    if (dto.status === VendorPayoutStatus.PAID) patch.paidAt = now;
+    if (dto.status === VendorPayoutStatus.FAILED) {
+      patch.failedAt = now;
+      patch.failureReason = dto.failureReason!;
+    }
+    if (dto.status === VendorPayoutStatus.CANCELED) {
+      patch.failureReason = dto.failureReason!;
+    }
+
+    await this.payouts.update(id, patch as any);
+
+    if (
+      dto.status === VendorPayoutStatus.FAILED ||
+      dto.status === VendorPayoutStatus.CANCELED
+    ) {
+      await this.ledger.create({
+        vendorId: current.vendorId,
+        type: LedgerEntryType.PAYOUT_REVERSED,
+        amountMinor: current.amountMinor,
+        currencyCode: current.currencyCode,
+        availableAt: now,
+        payoutId: id,
+        memo: `Reversal: ${dto.failureReason ?? ''}`,
+      });
+    }
+
+    await this.audit.record({
+      adminUserId,
+      action: ACTION_BY_STATUS[dto.status],
+      targetType: 'vendor_payout',
+      targetId: id,
+      payload: { failureReason: dto.failureReason, memo: dto.memo },
+    });
+  }
+
+  async createAdjustment(input: {
+    vendorId: string;
+    amountMinor: string;
+    memo: string;
+    adminUserId: string;
+  }): Promise<void> {
+    if (input.amountMinor === '0')
+      throw new BadRequestException('amountMinor must be nonzero');
+
+    await this.ledger.create({
+      vendorId: input.vendorId,
+      type: LedgerEntryType.ADJUSTMENT,
+      amountMinor: input.amountMinor,
+      currencyCode: 'SAR',
+      availableAt: new Date(),
+      adminUserId: input.adminUserId,
+      memo: input.memo,
+    });
+
+    await this.audit.record({
+      adminUserId: input.adminUserId,
+      action: 'LEDGER_ADJUSTMENT',
+      targetType: 'vendor',
+      targetId: input.vendorId,
+      payload: { amountMinor: input.amountMinor, memo: input.memo },
+    });
   }
 
   async onReturnRefunded(input: OnReturnRefundedInput): Promise<void> {

@@ -2,7 +2,7 @@ import { PayoutService } from './payout.service';
 import { VendorLedgerRepository } from './infrastructure/persistence/vendor-ledger.abstract.repository';
 import { VendorPayoutRepository } from './infrastructure/persistence/vendor-payout.abstract.repository';
 import { PayoutBatchRepository } from './infrastructure/persistence/payout-batch.abstract.repository';
-import { LedgerEntryType } from './domain/payout-enums';
+import { LedgerEntryType, VendorPayoutStatus } from './domain/payout-enums';
 
 describe('PayoutService.onSubOrderDelivered', () => {
   let service: PayoutService;
@@ -181,6 +181,192 @@ describe('PayoutService.onReturnRefunded', () => {
       currencyCode: 'SAR',
     });
     expect(ledger.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PayoutService state transitions', () => {
+  let service: PayoutService;
+  let ledger: jest.Mocked<VendorLedgerRepository>;
+  let payouts: jest.Mocked<VendorPayoutRepository>;
+  let batches: jest.Mocked<PayoutBatchRepository>;
+  let vendors: any;
+  let settings: any;
+  let audit: any;
+  let kyc: any;
+
+  const basePayout = (overrides = {}) => ({
+    id: 'p1',
+    vendorId: 'v1',
+    cycleKey: '2026-W19',
+    amountMinor: '7000',
+    currencyCode: 'SAR',
+    status: VendorPayoutStatus.PENDING,
+    ibanSnapshot: 'SA',
+    bankNameSnapshot: 'BankX',
+    accountHolderSnapshot: null,
+    issuedAt: null,
+    paidAt: null,
+    failedAt: null,
+    failureReason: null,
+    adminUserId: null,
+    createdAt: new Date(),
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    ledger = { create: jest.fn() } as any;
+    payouts = {
+      findById: jest.fn(),
+      update: jest
+        .fn()
+        .mockImplementation((id, p) =>
+          Promise.resolve(basePayout({ id, ...p })),
+        ),
+    } as any;
+    batches = {} as any;
+    vendors = {};
+    settings = {};
+    audit = { record: jest.fn() };
+    kyc = {};
+    service = new PayoutService(
+      ledger,
+      payouts,
+      batches,
+      vendors,
+      settings,
+      audit,
+      kyc,
+    );
+  });
+
+  it('should transition PENDING -> ISSUED and set issuedAt and audit-log', async () => {
+    payouts.findById.mockResolvedValue(
+      basePayout({ status: VendorPayoutStatus.PENDING }) as any,
+    );
+    await service.reviewPayout(
+      'p1',
+      { status: VendorPayoutStatus.ISSUED },
+      'admin1',
+    );
+    expect(payouts.update).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({
+        status: VendorPayoutStatus.ISSUED,
+        adminUserId: 'admin1',
+      }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adminUserId: 'admin1',
+        action: 'PAYOUT_MARKED_ISSUED',
+        targetType: 'vendor_payout',
+        targetId: 'p1',
+      }),
+    );
+  });
+
+  it('should transition ISSUED -> PAID and set paidAt and audit-log', async () => {
+    payouts.findById.mockResolvedValue(
+      basePayout({ status: VendorPayoutStatus.ISSUED }) as any,
+    );
+    await service.reviewPayout(
+      'p1',
+      { status: VendorPayoutStatus.PAID },
+      'admin1',
+    );
+    expect(payouts.update).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({ status: VendorPayoutStatus.PAID }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PAYOUT_MARKED_PAID' }),
+    );
+  });
+
+  it('should transition ISSUED -> FAILED with failureReason and insert PAYOUT_REVERSED ledger entry', async () => {
+    payouts.findById.mockResolvedValue(
+      basePayout({
+        status: VendorPayoutStatus.ISSUED,
+        amountMinor: '7000',
+      }) as any,
+    );
+    await service.reviewPayout(
+      'p1',
+      { status: VendorPayoutStatus.FAILED, failureReason: 'IBAN invalid' },
+      'admin1',
+    );
+    expect(ledger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendorId: 'v1',
+        type: LedgerEntryType.PAYOUT_REVERSED,
+        amountMinor: '7000',
+        payoutId: 'p1',
+      }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PAYOUT_MARKED_FAILED' }),
+    );
+  });
+
+  it('should transition PENDING -> CANCELED and insert PAYOUT_REVERSED ledger entry', async () => {
+    payouts.findById.mockResolvedValue(
+      basePayout({
+        status: VendorPayoutStatus.PENDING,
+        amountMinor: '7000',
+      }) as any,
+    );
+    await service.reviewPayout(
+      'p1',
+      { status: VendorPayoutStatus.CANCELED, failureReason: 'wrong amount' },
+      'admin1',
+    );
+    expect(ledger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: LedgerEntryType.PAYOUT_REVERSED,
+        amountMinor: '7000',
+        payoutId: 'p1',
+      }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PAYOUT_CANCELED' }),
+    );
+  });
+
+  it('should reject invalid transitions (PAID -> PENDING)', async () => {
+    payouts.findById.mockResolvedValue(
+      basePayout({ status: VendorPayoutStatus.PAID }) as any,
+    );
+    await expect(
+      service.reviewPayout(
+        'p1',
+        { status: VendorPayoutStatus.PENDING },
+        'admin1',
+      ),
+    ).rejects.toThrow(/invalid transition/i);
+  });
+
+  it('should write ADJUSTMENT entry with memo and audit-log for createAdjustment', async () => {
+    await service.createAdjustment({
+      vendorId: 'v1',
+      amountMinor: '-5000',
+      memo: 'Goodwill credit per ticket #1234',
+      adminUserId: 'admin1',
+    });
+    expect(ledger.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendorId: 'v1',
+        type: LedgerEntryType.ADJUSTMENT,
+        amountMinor: '-5000',
+        memo: 'Goodwill credit per ticket #1234',
+      }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'LEDGER_ADJUSTMENT',
+        targetType: 'vendor',
+        targetId: 'v1',
+      }),
+    );
   });
 });
 
