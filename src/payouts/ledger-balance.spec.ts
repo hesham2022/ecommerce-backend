@@ -70,4 +70,16 @@ describe('computeBalance', () => {
       lifetimePaidMinor: '5000',
     });
   });
+
+  it('should treat ADJUSTMENT entries as available (positive credits, negative debits)', () => {
+    const entries = [
+      entry(LedgerEntryType.ADJUSTMENT, '2000', '2026-05-01T00:00:00Z'), // credit
+      entry(LedgerEntryType.ADJUSTMENT, '-500', '2026-05-02T00:00:00Z'), // debit
+    ];
+    expect(computeBalance(entries, NOW)).toEqual({
+      heldMinor: '0',
+      availableMinor: '1500',
+      lifetimePaidMinor: '0',
+    });
+  });
 });

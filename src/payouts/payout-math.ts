@@ -1,4 +1,4 @@
-interface EarningInput {
+export interface EarningInput {
   subtotalMinor: string;
   shippingMinor: string;
   commissionRate: string;
@@ -11,7 +11,7 @@ export function computeEarning(input: EarningInput): string {
   return (subtotal + shipping - fee).toString();
 }
 
-interface ClawbackInput {
+export interface ClawbackInput {
   refundedSubtotalMinor: string;
   refundedShippingMinor: string;
   commissionRate: string;
@@ -24,13 +24,13 @@ export function computeClawback(input: ClawbackInput): string {
   return (netSubtotal + shipping).toString();
 }
 
-interface SplitInput {
+export interface SplitInput {
   totalRefundMinor: string;
   originalSubtotalMinor: string;
   originalShippingMinor: string;
 }
 
-interface Split {
+export interface Split {
   refundedSubtotalMinor: string;
   refundedShippingMinor: string;
 }
@@ -41,6 +41,11 @@ export function proportionalRefundSplit(input: SplitInput): Split {
   const shipping = BigInt(input.originalShippingMinor);
   const denom = subtotal + shipping;
   if (denom === 0n) {
+    if (total !== 0n) {
+      throw new Error(
+        `proportionalRefundSplit: denom is 0 but totalRefundMinor is ${total}`,
+      );
+    }
     return { refundedSubtotalMinor: '0', refundedShippingMinor: '0' };
   }
   const refundedShipping = (total * shipping) / denom;
