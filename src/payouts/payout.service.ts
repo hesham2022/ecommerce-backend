@@ -3,7 +3,16 @@ import { VendorLedgerRepository } from './infrastructure/persistence/vendor-ledg
 import { VendorPayoutRepository } from './infrastructure/persistence/vendor-payout.abstract.repository';
 import { PayoutBatchRepository } from './infrastructure/persistence/payout-batch.abstract.repository';
 import { LedgerEntryType } from './domain/payout-enums';
-import { computeEarning } from './payout-math';
+import { computeEarning, computeClawback } from './payout-math';
+
+export interface OnReturnRefundedInput {
+  returnId: string;
+  vendorId: string;
+  subOrderId: string;
+  refundedSubtotalMinor: string;
+  refundedShippingMinor: string;
+  currencyCode: string;
+}
 
 export interface OnSubOrderDeliveredInput {
   subOrderId: string;
@@ -77,6 +86,32 @@ export class PayoutService {
       availableAt,
       subOrderId: input.subOrderId,
       memo: `Earning from sub-order ${input.subOrderId}`,
+    });
+  }
+
+  async onReturnRefunded(input: OnReturnRefundedInput): Promise<void> {
+    const existing = await this.ledger.findClawbackForReturn(input.returnId);
+    if (existing) return;
+
+    const vendor = await this.vendors.findById(input.vendorId);
+    if (!vendor)
+      throw new NotFoundException(`vendor ${input.vendorId} not found`);
+
+    const clawback = computeClawback({
+      refundedSubtotalMinor: input.refundedSubtotalMinor,
+      refundedShippingMinor: input.refundedShippingMinor,
+      commissionRate: vendor.commissionRate,
+    });
+
+    await this.ledger.create({
+      vendorId: input.vendorId,
+      type: LedgerEntryType.REFUND_CLAWBACK,
+      amountMinor: `-${clawback}`,
+      currencyCode: input.currencyCode,
+      availableAt: new Date(),
+      returnId: input.returnId,
+      subOrderId: input.subOrderId,
+      memo: `Refund clawback for return ${input.returnId}`,
     });
   }
 }

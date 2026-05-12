@@ -107,3 +107,79 @@ describe('PayoutService.onSubOrderDelivered', () => {
     ).rejects.toThrow(/vendor v1 not found/i);
   });
 });
+
+describe('PayoutService.onReturnRefunded', () => {
+  let service: PayoutService;
+  let ledger: jest.Mocked<VendorLedgerRepository>;
+  let payouts: jest.Mocked<VendorPayoutRepository>;
+  let batches: jest.Mocked<PayoutBatchRepository>;
+  let vendors: any;
+  let settings: any;
+  let audit: any;
+  let kyc: any;
+
+  beforeEach(() => {
+    ledger = {
+      create: jest.fn(),
+      findByVendor: jest.fn(),
+      list: jest.fn(),
+      findByPayout: jest.fn(),
+      findEarningForSubOrder: jest.fn(),
+      findClawbackForReturn: jest.fn().mockResolvedValue(null),
+    } as any;
+    payouts = {} as any;
+    batches = {} as any;
+    vendors = { findById: jest.fn() };
+    settings = { getValue: jest.fn() };
+    audit = { record: jest.fn() };
+    kyc = {} as any;
+    service = new PayoutService(
+      ledger,
+      payouts,
+      batches,
+      vendors,
+      settings,
+      audit,
+      kyc,
+    );
+  });
+
+  it('should write a negative REFUND_CLAWBACK entry, available immediately, commission proportionally returned', async () => {
+    vendors.findById.mockResolvedValue({ id: 'v1', commissionRate: '0.10' });
+
+    await service.onReturnRefunded({
+      returnId: 'r1',
+      vendorId: 'v1',
+      subOrderId: 'so1',
+      refundedSubtotalMinor: '10000',
+      refundedShippingMinor: '1500',
+      currencyCode: 'SAR',
+    });
+
+    expect(ledger.create).toHaveBeenCalledTimes(1);
+    const arg = ledger.create.mock.calls[0][0];
+    expect(arg).toMatchObject({
+      vendorId: 'v1',
+      type: LedgerEntryType.REFUND_CLAWBACK,
+      amountMinor: '-10500',
+      currencyCode: 'SAR',
+      returnId: 'r1',
+      subOrderId: 'so1',
+    });
+    const diff = Math.abs(Date.now() - arg.availableAt.getTime());
+    expect(diff).toBeLessThan(5000);
+  });
+
+  it('should be idempotent on returnId', async () => {
+    ledger.findClawbackForReturn.mockResolvedValue({ id: 'existing' } as any);
+    await service.onReturnRefunded({
+      returnId: 'r1',
+      vendorId: 'v1',
+      subOrderId: 'so1',
+      refundedSubtotalMinor: '100',
+      refundedShippingMinor: '0',
+      currencyCode: 'SAR',
+    });
+    expect(ledger.create).not.toHaveBeenCalled();
+  });
+});
