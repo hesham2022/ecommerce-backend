@@ -14,6 +14,7 @@ import redisConfig from './redis/config/redis.config';
 import path from 'path';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthAppleModule } from './auth-apple/auth-apple.module';
 import { AuthFacebookModule } from './auth-facebook/auth-facebook.module';
 import { AuthGoogleModule } from './auth-google/auth-google.module';
@@ -73,6 +74,7 @@ const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
       envFilePath: ['.env'],
     }),
     infrastructureDatabaseModule,
+    ScheduleModule.forRoot(),
     I18nModule.forRootAsync({
       useFactory: (configService: ConfigService<AllConfigType>) => ({
         fallbackLanguage: configService.getOrThrow('app.fallbackLanguage', {
