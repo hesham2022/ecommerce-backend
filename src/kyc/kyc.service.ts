@@ -199,6 +199,35 @@ export class KycService {
     };
   }
 
+  async findLatestApprovedIban(vendorId: string): Promise<{
+    iban: string;
+    bankName: string;
+    accountHolderName?: string;
+  } | null> {
+    const docs = await this.docs.listForVendor({
+      vendorId,
+      type: KycDocumentType.IBAN_DOCUMENT,
+      includeSuperseded: true,
+    });
+    const ibanDocs = docs
+      .filter((d) => d.status === KycDocumentStatus.APPROVED)
+      .sort(
+        (a, b) =>
+          (b.reviewedAt?.getTime() ?? 0) - (a.reviewedAt?.getTime() ?? 0),
+      );
+    if (!ibanDocs.length) return null;
+    const d = ibanDocs[0].details as {
+      iban: string;
+      bankName: string;
+      accountHolderName?: string;
+    };
+    return {
+      iban: d.iban,
+      bankName: d.bankName,
+      accountHolderName: d.accountHolderName,
+    };
+  }
+
   async review(input: ReviewInput): Promise<KycDocument> {
     if (
       input.status !== KycDocumentStatus.APPROVED &&

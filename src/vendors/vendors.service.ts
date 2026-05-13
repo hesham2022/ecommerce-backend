@@ -5,6 +5,8 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { uuidv7Generate } from '../utils/uuid';
 import { Vendor, VendorStatus } from './domain/vendor';
 import { VendorAbstractRepository } from './infrastructure/persistence/vendor.abstract.repository';
@@ -14,6 +16,7 @@ import { UsersService } from '../users/users.service';
 import { RoleEnum } from '../roles/roles.enum';
 import { StatusEnum } from '../statuses/statuses.enum';
 import { KycStatus } from '../kyc/domain/kyc-enums';
+import { AdminAuditLogService } from '../admin-audit-log/admin-audit-log.service';
 
 const SLUG_MAX_LEN = 64;
 const SLUG_RETRY_LIMIT = 5;
@@ -34,6 +37,8 @@ export class VendorsService {
     private readonly settings: SettingsService,
     private readonly regions: RegionsService,
     private readonly users: UsersService,
+    private readonly audit: AdminAuditLogService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   async signup(input: SignupInput): Promise<Vendor> {
@@ -52,6 +57,9 @@ export class VendorsService {
 
     const slug = await this.uniqueSlug(input.name);
     const status = autoApprove ? VendorStatus.ACTIVE : VendorStatus.PENDING;
+    const commissionRate = await this.settings.getValue(
+      'payout_default_commission_rate',
+    );
 
     const vendor = await this.repo.create({
       id: uuidv7Generate(),
@@ -69,6 +77,7 @@ export class VendorsService {
       supportedRegionIds: [defaultRegion.id],
       returnWindowDays: 14,
       shipsFromCountry: null,
+      commissionRate,
     });
 
     if (status === VendorStatus.ACTIVE) {
@@ -175,6 +184,44 @@ export class VendorsService {
       throw new ForbiddenException('Only SUSPENDED vendors can be reinstated');
     }
     return this.repo.setStatus(id, VendorStatus.ACTIVE);
+  }
+
+  async listEligibleForPayout(
+    asOf: Date,
+  ): Promise<
+    Array<{ vendorId: string; availableMinor: string; currencyCode: string }>
+  > {
+    const rows = await this.dataSource.query(
+      `SELECT v.id AS vendor_id,
+              COALESCE(SUM(le.amount_minor), 0)::text AS available,
+              MAX(le.currency_code) AS currency_code
+       FROM vendor v
+       LEFT JOIN vendor_ledger_entry le ON le.vendor_id = v.id AND le.available_at <= $1
+       WHERE v.status = 'ACTIVE' AND v.kyc_status = 'APPROVED'
+       GROUP BY v.id
+       HAVING COALESCE(SUM(le.amount_minor), 0) > 0`,
+      [asOf],
+    );
+    return rows.map((r: any) => ({
+      vendorId: r.vendor_id,
+      availableMinor: r.available,
+      currencyCode: r.currency_code ?? 'SAR',
+    }));
+  }
+
+  async updateCommissionRate(
+    vendorId: string,
+    commissionRate: string,
+    adminUserId: number,
+  ): Promise<void> {
+    await this.repo.update(vendorId, { commissionRate });
+    await this.audit.record({
+      adminUserId,
+      action: 'VENDOR_COMMISSION_UPDATED',
+      targetType: 'vendor',
+      targetId: vendorId,
+      payload: { commissionRate },
+    });
   }
 
   private async grantVendorRole(userId: number): Promise<void> {

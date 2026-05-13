@@ -44,7 +44,8 @@ export class VendorRelationalRepository implements VendorAbstractRepository {
   }
 
   async create(
-    input: Omit<Vendor, 'createdAt' | 'updatedAt'>,
+    input: Omit<Vendor, 'createdAt' | 'updatedAt' | 'commissionRate'> &
+      Partial<Pick<Vendor, 'commissionRate'>>,
   ): Promise<Vendor> {
     const entity = this.repo.create(input);
     const saved = await this.repo.save(entity);

@@ -17,6 +17,7 @@ export class VendorMapper {
     d.supportedRegionIds = entity.supportedRegionIds ?? [];
     d.returnWindowDays = entity.returnWindowDays;
     d.shipsFromCountry = entity.shipsFromCountry;
+    d.commissionRate = entity.commissionRate;
     d.createdAt = entity.createdAt;
     d.updatedAt = entity.updatedAt;
     return d;

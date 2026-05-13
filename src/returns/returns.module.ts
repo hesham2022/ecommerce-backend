@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { OrdersModule } from '../orders/orders.module';
 import { RelationalOrderPersistenceModule } from '../orders/infrastructure/persistence/relational/relational-persistence.module';
 import { FilesModule } from '../files/files.module';
@@ -9,15 +9,17 @@ import { RelationalReturnPersistenceModule } from './infrastructure/persistence/
 import { ReturnsController } from './returns.controller';
 import { ReturnsService } from './returns.service';
 import { VendorReturnsController } from './vendor-returns.controller';
+import { PayoutsModule } from '../payouts/payouts.module';
 
 @Module({
   imports: [
     RelationalReturnPersistenceModule,
     RelationalOrderPersistenceModule,
-    OrdersModule,
+    forwardRef(() => OrdersModule),
     FilesModule,
     VendorsModule,
     ProductsModule,
+    forwardRef(() => PayoutsModule),
   ],
   controllers: [
     ReturnsController,

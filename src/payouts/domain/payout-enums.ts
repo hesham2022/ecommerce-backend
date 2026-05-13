@@ -1,0 +1,20 @@
+export enum LedgerEntryType {
+  EARNING = 'EARNING',
+  REFUND_CLAWBACK = 'REFUND_CLAWBACK',
+  PAYOUT_ISSUED = 'PAYOUT_ISSUED',
+  PAYOUT_REVERSED = 'PAYOUT_REVERSED',
+  ADJUSTMENT = 'ADJUSTMENT',
+}
+
+export enum VendorPayoutStatus {
+  PENDING = 'PENDING',
+  ISSUED = 'ISSUED',
+  PAID = 'PAID',
+  FAILED = 'FAILED',
+  CANCELED = 'CANCELED',
+}
+
+export enum PayoutBatchStatus {
+  BUILDING = 'BUILDING',
+  READY = 'READY',
+}

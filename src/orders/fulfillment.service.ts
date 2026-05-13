@@ -25,6 +25,7 @@ import {
   assertVendorTransition,
   VendorTargetStatus,
 } from './sub-order-state-machine';
+import { PayoutService } from '../payouts/payout.service';
 
 export interface VendorUpdateStatusInput {
   vendorId: string;
@@ -56,6 +57,7 @@ export class FulfillmentService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly events: OrderEventAbstractRepository,
+    private readonly payouts: PayoutService,
   ) {}
 
   /**
@@ -184,6 +186,15 @@ export class FulfillmentService {
       sub.fulfillmentStatus = SubOrderFulfillmentStatus.DELIVERED;
       sub.deliveredAt = now;
       const savedSub = await subRepo.save(sub);
+
+      await this.payouts.onSubOrderDelivered({
+        subOrderId: savedSub.id,
+        vendorId: savedSub.vendorId,
+        subtotalMinor: savedSub.subtotalMinor,
+        shippingMinor: savedSub.shippingMinor,
+        currencyCode: order.currencyCode ?? 'SAR',
+        deliveredAt: savedSub.deliveredAt!,
+      });
 
       // Both DELIVERED_BY_BUYER and PAYMENT_COLLECTED rows get appended.
       await this.events.append(

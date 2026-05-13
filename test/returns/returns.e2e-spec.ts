@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { ADMIN_EMAIL, ADMIN_PASSWORD, APP_URL } from '../utils/constants';
+import { approveVendorFully } from '../utils/payouts-fixtures';
 
 describe('Returns / RMA (e2e)', () => {
   const ts = Date.now();
@@ -53,10 +54,15 @@ describe('Returns / RMA (e2e)', () => {
       });
     vendorId = vendorSignup.body.id as string;
 
-    await request(APP_URL)
-      .patch(`/api/v1/admin/vendors/${vendorId}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`);
+    // Login once (PENDING status) so approveVendorFully can upload KYC docs.
+    const pendingLogin = await request(APP_URL)
+      .post('/api/v1/auth/email/login')
+      .send({ email: vendorEmail, password: vendorPassword });
+    const pendingVendorToken = pendingLogin.body.token as string;
 
+    await approveVendorFully(adminToken, pendingVendorToken, vendorId);
+
+    // Re-login to obtain a fresh token reflecting ACTIVE status.
     const vendorLogin = await request(APP_URL)
       .post('/api/v1/auth/email/login')
       .send({ email: vendorEmail, password: vendorPassword });
@@ -449,9 +455,13 @@ describe('Returns / RMA (e2e)', () => {
         name: `RMA Shop 2 ${ts}`,
       });
     const v2VendorId = v2Signup.body.id as string;
-    await request(APP_URL)
-      .patch(`/api/v1/admin/vendors/${v2VendorId}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`);
+    // Need to obtain a token while still PENDING so approveVendorFully can
+    // upload KYC docs, then re-login after activation.
+    const v2PendingLogin = await request(APP_URL)
+      .post('/api/v1/auth/email/login')
+      .send({ email: v2Email, password: 'Pass1234!' });
+    const v2PendingToken = v2PendingLogin.body.token as string;
+    await approveVendorFully(adminToken, v2PendingToken, v2VendorId);
     const v2Login = await request(APP_URL)
       .post('/api/v1/auth/email/login')
       .send({ email: v2Email, password: 'Pass1234!' });

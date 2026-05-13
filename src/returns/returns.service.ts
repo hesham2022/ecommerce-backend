@@ -15,6 +15,8 @@ import {
   assertBuyerTransition,
   assertVendorTransition,
 } from './return-state-machine';
+import { PayoutService } from '../payouts/payout.service';
+import { proportionalRefundSplit } from '../payouts/payout-math';
 
 const MAX_ATTACHMENTS = 5;
 
@@ -49,6 +51,7 @@ export class ReturnsService {
     private readonly orders: OrderAbstractRepository,
     private readonly files: FilesService,
     private readonly vendors: VendorsService,
+    private readonly payouts: PayoutService,
   ) {}
 
   async create(input: CreateReturnServiceInput): Promise<Return> {
@@ -279,11 +282,37 @@ export class ReturnsService {
         });
       }
 
-      case ReturnStatus.REFUNDED:
-        return this.returns.markRefunded({
+      case ReturnStatus.REFUNDED: {
+        const refunded = await this.returns.markRefunded({
           id: input.returnId,
           refundedAt: now,
         });
+        const orderId = await this.orders.findOrderIdForSubOrder(
+          refunded.subOrderId,
+        );
+        if (orderId) {
+          const order = await this.orders.findHydratedById(orderId);
+          const subOrder = order?.subOrders?.find(
+            (s) => s.id === refunded.subOrderId,
+          );
+          if (subOrder) {
+            const split = proportionalRefundSplit({
+              totalRefundMinor: refunded.totalRefundMinor,
+              originalSubtotalMinor: subOrder.subtotalMinor,
+              originalShippingMinor: subOrder.shippingMinor,
+            });
+            await this.payouts.onReturnRefunded({
+              returnId: refunded.id,
+              vendorId: subOrder.vendorId,
+              subOrderId: subOrder.id,
+              refundedSubtotalMinor: split.refundedSubtotalMinor,
+              refundedShippingMinor: split.refundedShippingMinor,
+              currencyCode: order!.currencyCode ?? 'SAR',
+            });
+          }
+        }
+        return refunded;
+      }
 
       case ReturnStatus.CLOSED: {
         const closed = await this.returns.markClosed({

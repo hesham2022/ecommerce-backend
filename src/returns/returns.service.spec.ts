@@ -8,6 +8,7 @@ import { ReturnAbstractRepository } from './infrastructure/persistence/return.ab
 import { OrderAbstractRepository } from '../orders/infrastructure/persistence/order.abstract.repository';
 import { FilesService } from '../files/files.service';
 import { VendorsService } from '../vendors/vendors.service';
+import { PayoutService } from '../payouts/payout.service';
 import { Return } from './domain/return';
 import { ReturnReason, ReturnStatus } from './domain/return-enums';
 import { Order } from '../orders/domain/order';
@@ -19,6 +20,7 @@ describe('ReturnsService', () => {
   let ordersRepo: jest.Mocked<OrderAbstractRepository>;
   let filesService: jest.Mocked<FilesService>;
   let vendorsService: jest.Mocked<VendorsService>;
+  let payoutService: jest.Mocked<PayoutService>;
 
   const NOW = new Date('2026-05-15T10:00:00Z');
   const DELIVERED_AT = new Date('2026-05-10T12:00:00Z'); // 5 days ago
@@ -85,6 +87,11 @@ describe('ReturnsService', () => {
       }),
     } as unknown as jest.Mocked<VendorsService>;
 
+    payoutService = {
+      onSubOrderDelivered: jest.fn().mockResolvedValue(undefined),
+      onReturnRefunded: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<PayoutService>;
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         ReturnsService,
@@ -92,6 +99,7 @@ describe('ReturnsService', () => {
         { provide: OrderAbstractRepository, useValue: ordersRepo },
         { provide: FilesService, useValue: filesService },
         { provide: VendorsService, useValue: vendorsService },
+        { provide: PayoutService, useValue: payoutService },
       ],
     }).compile();
     service = moduleRef.get(ReturnsService);

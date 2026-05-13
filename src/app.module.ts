@@ -14,6 +14,7 @@ import redisConfig from './redis/config/redis.config';
 import path from 'path';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthAppleModule } from './auth-apple/auth-apple.module';
 import { AuthFacebookModule } from './auth-facebook/auth-facebook.module';
 import { AuthGoogleModule } from './auth-google/auth-google.module';
@@ -47,6 +48,7 @@ import { AdminAuditLogModule } from './admin-audit-log/admin-audit-log.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AdminSearchModule } from './admin-search/admin-search.module';
 import { KycModule } from './kyc/kyc.module';
+import { PayoutsModule } from './payouts/payouts.module';
 
 const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
   useClass: TypeOrmConfigService,
@@ -73,6 +75,7 @@ const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
       envFilePath: ['.env'],
     }),
     infrastructureDatabaseModule,
+    ScheduleModule.forRoot(),
     I18nModule.forRootAsync({
       useFactory: (configService: ConfigService<AllConfigType>) => ({
         fallbackLanguage: configService.getOrThrow('app.fallbackLanguage', {
@@ -128,6 +131,7 @@ const infrastructureDatabaseModule = TypeOrmModule.forRootAsync({
     NotificationsModule,
     AdminSearchModule,
     KycModule,
+    PayoutsModule,
   ],
 })
 export class AppModule {}

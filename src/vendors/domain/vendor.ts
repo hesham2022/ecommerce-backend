@@ -53,6 +53,9 @@ export class Vendor {
   @ApiProperty({ enum: KycStatus, example: KycStatus.NOT_SUBMITTED })
   kycStatus!: KycStatus;
 
+  @ApiProperty({ example: '0.10' })
+  commissionRate!: string;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
